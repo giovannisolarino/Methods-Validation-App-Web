@@ -14,7 +14,6 @@
 <a href="#euroanalysis-2025">EUROANALYSIS 2025</a> •
   <a href="#key-features">Key Features</a> •
   <a href="#demo-version">Demo Version</a> •
-  <a href="#how-to-use">How To Use</a> 
   <br>
   <a href="#download">Download</a> •
   <a href="#credits">Credits</a> •
@@ -45,14 +44,6 @@
 ## Demo Version
 MVA has not been released yet, but we can provide you with a demo version if you’re interested. 
 [Contact us!](mailto:giovanni.solarino@unito.it)
-## How To Use
-
-To run this application, download the **MVA_setup.exe** file and install it with administrator privileges. 
-Ensure that you always run the application as an administrator for proper functionality.
-
-## Download
-
-Coming soon
 
 ## Credits
 
