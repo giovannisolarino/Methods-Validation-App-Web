@@ -11,9 +11,10 @@
 <h4 align="center">Analytical method validation software written in Python.</h4>
 
 <p align="center">
-<a href="#euroanalysis-2025">EUROANALYSIS 2025</a> •
   <a href="#key-features">Key Features</a> •
-  <a href="#demo-version">Demo Version</a> •
+  <a href="#web-app">Web-app</a> •
+  <a href="#datasets">Datasets</a> •
+  <a href="#code-structure-project">Code Structure Project</a> •
   <br>
   <a href="#download">Download</a> •
   <a href="#credits">Credits</a> •
@@ -23,8 +24,6 @@
   <a href="#license">License</a>
 </p>
 
-## EUROANALYSIS 2025
-[Here](./mva_poster_solarino.pdf) you can find the poster presented at EUROANALYSIS 2025
 
 ## Key Features
 
@@ -41,9 +40,52 @@
 * Matrix effect
 * Recovery
 
-## Demo Version
-MVA has not been released yet, but we can provide you with a demo version if you’re interested. 
-[Contact us!](mailto:giovanni.solarino@unito.it)
+## Web-app
+MVA (Version 1.0) is now freely available at [mva.databloom.eu](https://mva.databloom.eu/).
+
+## Datasets
+Inside the [dataset](./dataset/) folder you can find three datasets to explore how MVA works. Examples on how to use them is provided in the [User Guide](./User_Manual_MVA_1_0.pdf).
+
+## Code Structure Project
+```
+Methods-Validation-App-Web/
+├─ MVA/
+│  ├─ theme.py                       # Shared theme across pages
+|  ├─ menu.py                        # Shared menu across pages
+|  ├─ home_page.py
+|  ├─ all_pages.py
+|  ├─ main.py                        # Main entry
+│  ├─ pages/                         # NiceGUI pages (UI only)
+│  │  ├─ import_data.py
+│  │  ├─ linearity.py
+│  │  ├─ lod_n_loq.py
+│  │  ├─ precision.py
+│  │  ├─ accuracy.py
+│  │  └─ add_params.py
+│  │
+│  ├─ ack_mva/                       # Acknowledgements
+│  │  └─ credits.py
+|  ├─ app/
+│  │  ├─ __init__.py
+│  │  └─ startup.py
+│  │  
+|  ├─ static/
+│  │  ├─ icons/
+│  │  │  ├─ logo.ico
+│  │  │  ├─ logo.png
+│  │  │  └─ logo_no_bg.png                
+│  │  ├─ example.xlsx                # Template dataset
+│  │  └─ example.xlsx
+│  │
+│  ├─ utilities/                     # Backend functions
+│     ├─ os_utilities.py             # Handlers for folders
+│     ├─ pd_utilities.py             # Pandas utilities
+│     ├─ plotly_utilities.py         # Graphs
+│     └─ stat_test.py                # Statistical tests
+│  
+└─
+
+```
 
 ## Credits
 
@@ -72,9 +114,6 @@ If you're looking to enhance your validation study with additional key parameter
 
 Upcoming publication
 
-## You may also like...
-
-- [SpectrApp](https://www.spectrapp.unito.it/app/spectrapp) - A chemometric tool for multivariate data analysis
 
 ## License
 
