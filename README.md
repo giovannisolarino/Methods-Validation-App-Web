@@ -7,7 +7,6 @@
   Methods Validation App
 <br>
 </h1>
-<h2 align="center">MVA WILL BE PUBLISHED SOON.</h2>
 <h4 align="center">Analytical method validation software written in Python.</h4>
 
 <p align="center">
