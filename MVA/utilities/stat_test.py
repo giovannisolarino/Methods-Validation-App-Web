@@ -30,6 +30,17 @@ def grouping(df: pd.DataFrame):
 def levene_test(df: pd.DataFrame):
     #Levene test for heteroscedasticity
         groups = grouping(df)
+
+        if not groups:
+            raise ValueError('No calibration data left to test: the leave-one-out training set is empty.')
+
+        #A single replicate per level leaves the within-level variance undefined, which
+        #happens intra-day whenever a day holds only two curves and leave-one-out drops
+        #one of them. Falling back to the homoscedastic branch (OLS) explicitly, rather
+        #than leaning on scipy returning NaN.
+        if min(len(group) for group in groups.values()) < 2:
+            return pd.DataFrame({'p-value': [np.nan], 'Outcome': ['Homoscedastic']}), 'Homoscedastic'
+
         warnings.filterwarnings("ignore", category=RuntimeWarning)
         res = stats.levene(*groups.values(), center='mean')
         warnings.filterwarnings("default", category=RuntimeWarning)
@@ -60,14 +71,15 @@ def f_test_sced(df: pd.DataFrame):
         dfn = groups[ULOQ].size-1  
         dfd = groups[LLOQ].size-1  
         p = 1-stats.f.cdf(f, dfn, dfd)
-    if p <= 0.05:
-        outcome_f = 'Heteroscedastic'
-    elif p > 0.05:
-        outcome_f = 'Homoscedastic'
-    
+
     if not np.isfinite(p):
         ui.notify('The input data is constant. The F-test may not be valid.', type='warning')
-    
+        outcome_f = 'Homoscedastic'
+    elif p <= 0.05:
+        outcome_f = 'Heteroscedastic'
+    else:
+        outcome_f = 'Homoscedastic'
+
     f_df = {'p-value':[round(p,4)],'Outcome':[outcome_f]}
     f_df = pd.DataFrame(f_df)
 
@@ -77,10 +89,14 @@ def f_test_sced(df: pd.DataFrame):
 def weight_sel(df: pd.DataFrame):
     #Variance evaluation for weight selection
     if app.storage.user['sced_test'] == 'Heteroscedastic':
-        df['W_no_weight'] = df['x']
-        df['W_1/x'] = 1/df['x']
-        df['W_1/x2'] = 1/(df['x']**2)
-        weights = df.iloc[:,-3:].reset_index(drop=True).drop_duplicates().reset_index(drop=True)
+        #One row per concentration level, sorted by x so that it lines up with
+        #the groupby('x') variances below.
+        x_levels = np.sort(df['x'].unique())
+        weights = pd.DataFrame({
+            'W_no_weight': np.ones(len(x_levels)),
+            'W_1/x': 1/x_levels,
+            'W_1/x2': 1/(x_levels**2),
+        })
         Sum_no_weight = np.sqrt(weights['W_no_weight']).sum()
         Sum_1_x = np.sqrt(weights['W_1/x']).sum()
         Sum_1_x2 = np.sqrt(weights['W_1/x2']).sum()
@@ -106,16 +122,15 @@ def weight_sel(df: pd.DataFrame):
             weight = weights['W_1/x2']
             result = '1/x\u00b2'
 
-        if weight.isin([0]).any().any():
+        if weight.isin([0]).any():
             weight = weights['W_no_weight']
             result = 'No weight'
 
         variance = pd.DataFrame(variance)
-        
-        rep = df['Calibrator'].value_counts()
-        weight_df = np.repeat(weight, rep)
-        weight_df.index = df.index
-        df['Weight'] = weight_df
+
+        #Map each level's weight onto its rows by concentration, so that unbalanced
+        #designs (unequal replicate counts) keep every weight on the right row.
+        df['Weight'] = df['x'].map(pd.Series(weight.values, index=x_levels))
     
     elif app.storage.user['sced_test'] == 'Homoscedastic':
         variance = ''
@@ -157,11 +172,8 @@ def mandel_test(lin_mod, quad_mod):
     F_mandel = ((lin_mod.nobs-2)*S_l - (quad_mod.nobs-3)*S_q)/S_q
     F_critic = stats.f.ppf(q=1-0.05, dfn = 1, dfd=quad_mod.df_resid)
 
-    if F_mandel > F_critic:
-        result = 'Quadratic'
-    
-    elif F_mandel < F_critic:
-        result = 'Linear'
+    #On a tie the quadratic term brings no significant improvement, so keep the simpler model.
+    result = 'Quadratic' if F_mandel > F_critic else 'Linear'
 
     mandel_summary = pd.DataFrame({
         'F-Mandel' : [F_mandel],
@@ -187,13 +199,34 @@ def double_check(lin_mod, quad_mod):
         
     return result, data_stat
 
+def select_model(results: dict, kind: Literal['wls', 'ols']):
+    #Pick linear vs quadratic exactly the way the Linearity page does, so that the model
+    #the user is shown is the model the backcalculation actually uses.
+    #Mandel's test runs on the models fitted to the raw points, n = k*l, as in Eq. (3) of
+    #Alladio et al.; running it on the level means instead leaves 2 residual degrees of
+    #freedom and a different F-critic. When it calls quadratic, the residual double check
+    #falls back to the simpler model if the two fits are statistically indistinguishable.
+    mandel, summary = mandel_test(results[f'{kind}_lin_raw'], results[f'{kind}_quad_raw'])
+    if mandel == 'Quadratic':
+        fallback, _ = double_check(results[f'{kind}_lin_raw'], results[f'{kind}_quad_raw'])
+        if fallback == 'Linear':
+            mandel = 'Linear'
+    return mandel, summary
+
+
 def model_wls(df:pd.DataFrame, means: pd.DataFrame, weight: pd.Series):
     #WLS model
     up = (max(means.x))+(max(means.x)-min(means.x))
     extended_x = np.linspace(-0.5, up, 10)
 
+    #Hand patsy only the two columns the formulas name. The frame still carries the user's
+    #original concentration/analyte/ISTD headers, and a column called I, C or Q shadows the
+    #patsy builtin of the same name, which makes I(x**2) below blow up with
+    #"'Series' object is not callable".
+    fit_data = df[['x', 'y']]
+
     wls_lin_means = wls(formula = 'y ~ x',data=means, weights=weight).fit()
-    wls_lin_raw = wls(formula='y ~ x', data=df, weights=df['Weight']).fit()
+    wls_lin_raw = wls(formula='y ~ x', data=fit_data, weights=df['Weight']).fit()
     line_wls_lin_means = wls_lin_means.params['Intercept'] + wls_lin_means.params['x']*means.x
     line_wls_lin_raw = wls_lin_raw.params['Intercept'] + wls_lin_raw.params['x']*extended_x
     equation_lin = f"y = {wls_lin_means.params['Intercept']:.4f} + {wls_lin_means.params['x']:.4f}x"
@@ -201,9 +234,9 @@ def model_wls(df:pd.DataFrame, means: pd.DataFrame, weight: pd.Series):
     
 
     wls_quad_means = wls(formula='y ~ x + I(x**2)', data=means, weights=weight).fit()
-    wls_quad_raw = wls(formula='y ~ x + I(x**2)', data=df, weights=df['Weight']).fit()
+    wls_quad_raw = wls(formula='y ~ x + I(x**2)', data=fit_data, weights=df['Weight']).fit()
     line_wls_quad_means = wls_quad_means.params['Intercept'] + wls_quad_means.params['x']*means.x + wls_quad_means.params['I(x ** 2)']*((means.x)**2)
-    line_wls_quad_raw = wls_quad_raw.params['Intercept'] + wls_quad_raw.params['x']*extended_x + wls_quad_means.params['I(x ** 2)']*((extended_x)**2)
+    line_wls_quad_raw = wls_quad_raw.params['Intercept'] + wls_quad_raw.params['x']*extended_x + wls_quad_raw.params['I(x ** 2)']*((extended_x)**2)
     equation_quad = f"y = {wls_quad_means.params['Intercept']:.4f} + {wls_quad_means.params['x']:.4f}x + {wls_quad_means.params['I(x ** 2)']:.4f}x\u00b2"
     r_squared_quad = f"R\u00b2: {wls_quad_means.rsquared:.4f}"
 
@@ -230,8 +263,12 @@ def model_ols(df:pd.DataFrame, means: pd.DataFrame):
     up = (max(means.x))+(max(means.x)-min(means.x))
     extended_x = np.linspace(-0.5, up, 10)
 
+    #See model_wls: patsy resolves names against the data frame first, so a user column
+    #named I, C or Q would shadow the patsy builtin and break I(x**2).
+    fit_data = df[['x', 'y']]
+
     ols_lin_means = ols(formula = 'y ~ x',data=means).fit()
-    ols_lin_raw = ols(formula='y ~ x', data=df).fit()
+    ols_lin_raw = ols(formula='y ~ x', data=fit_data).fit()
     line_ols_lin_means = ols_lin_means.params['Intercept'] + ols_lin_means.params['x']*means.x
     line_ols_lin_raw = ols_lin_raw.params['Intercept'] + ols_lin_raw.params['x']*extended_x
     equation_lin = f"y = {ols_lin_means.params['Intercept']:.4f} + {ols_lin_means.params['x']:.4f}x"
@@ -239,9 +276,9 @@ def model_ols(df:pd.DataFrame, means: pd.DataFrame):
     
 
     ols_quad_means = ols(formula='y ~ x + I(x**2)', data=means).fit()
-    ols_quad_raw = ols(formula='y ~ x + I(x**2)', data=df).fit()
+    ols_quad_raw = ols(formula='y ~ x + I(x**2)', data=fit_data).fit()
     line_ols_quad_means = ols_quad_means.params['Intercept'] + ols_quad_means.params['x']*means.x + ols_quad_means.params['I(x ** 2)']*((means.x)**2)
-    line_ols_quad_raw = ols_quad_raw.params['Intercept'] + ols_quad_raw.params['x']*extended_x + ols_quad_means.params['I(x ** 2)']*((extended_x)**2)
+    line_ols_quad_raw = ols_quad_raw.params['Intercept'] + ols_quad_raw.params['x']*extended_x + ols_quad_raw.params['I(x ** 2)']*((extended_x)**2)
     equation_quad = f"y = {ols_quad_means.params['Intercept']:.4f} + {ols_quad_means.params['x']:.4f}x + {ols_quad_means.params['I(x ** 2)']:.4f}x\u00b2"
     r_squared_quad = f"R\u00b2: {ols_quad_means.rsquared:.4f}"
 
@@ -264,35 +301,64 @@ def model_ols(df:pd.DataFrame, means: pd.DataFrame):
 
 
 def hub_vox(ncal:int, conf:float, df:pd.DataFrame, means:pd.DataFrame, result_weight:str):
-    #Hubaux and Vos algorithm:
-    input_istd = app.storage.user['istd_conc']       
+    # Hubaux and Vos algorithm, following Alladio et al., MethodsX 7 (2020) 100919, Eqs (7)-(11).
+    # Notation: k = ncal calibration levels, l = replicates per level, n = k*l standards.
+    # Everything is computed on the NORMALIZED scale (x = conc / C_ISTD, y = signal ratio)
+    # and rescaled to concentration exactly once, at the end, via input_istd.
+    # conf is the one-sided significance level alpha (0.05).
+    input_istd = app.storage.user['istd_conc']
+    if not (0 < conf < 0.5):
+        raise ValueError(f'conf is the one-sided significance level alpha (e.g. 0.05), got {conf!r}')
 
-    if result_weight == 'No weight':
-        n_weights = (df.x[df['Calibrator']<=ncal]*input_istd)
-        s_wi = np.sum(means.x[:ncal]*input_istd)
-        a = means.x[:ncal]*input_istd
+    sub   = df[df['Calibrator'] <= ncal]
+    x_cal = sub.x                      # normalized concentration, all standards
+    x_i   = means.x[:ncal]             # per-level normalized means (NO *input_istd)
+
+    # Eq (8) assumes a balanced design. Fall back to the most common replicate count
+    # when the levels disagree, and say so.
+    counts = sub['Calibrator'].value_counts()
+    l = int(counts.mode().iat[0])
+    if counts.nunique() > 1:
+        ui.notify(f'Calibration levels carry different replicate counts {sorted(counts.tolist())}. '
+                  f'Hubaux and Vos assumes a balanced design: using l = {l}.',
+                  type='warning', position='center', timeout=0, close_button='OK')
+
+    # '' is the homoscedastic case, 'No weight' the heteroscedastic case where the
+    # unweighted fit won on variance. Both mean w = 1 for every observation, which
+    # makes the weighted fit below degenerate into an ordinary least squares one.
+    if result_weight in ('No weight', ''):
+        n_weights = np.ones(len(x_cal))
+        a = np.ones(ncal)
     elif result_weight == '1/x':
-        n_weights = 1/((df.x[df['Calibrator']<=ncal]*input_istd))
-        s_wi = np.sum(1/((means.x[:ncal]*input_istd)))
-        a = (1/((means.x[:ncal]*input_istd)))
-    elif result_weight == '':
-        n_weights = np.ones(len(df.x[df['Calibrator']<=ncal]*input_istd))
-        s_wi = np.sum(means.x[:ncal]*input_istd)
-        a = means.x[:ncal]*input_istd
+        n_weights = 1/x_cal
+        a = 1/x_i
     elif result_weight == '1/x²':
-        n_weights = 1/((df.x[df['Calibrator']<=ncal]*input_istd)**2)
-        s_wi = np.sum(1/((means.x[:ncal]*input_istd)**2))
-        a = (1/((means.x[:ncal]*input_istd)**2))
+        n_weights = 1/(x_cal**2)
+        a = 1/(x_i**2)
+    else:
+        raise ValueError(f'Unknown weight type: {result_weight!r}')
 
-    w_i_x_i = n_weights*(df.iloc[:,1][df['Calibrator']<=ncal])
-    x_w = (np.sum(w_i_x_i))/np.sum(n_weights)
-    regr = ols(formula='y ~ x',data=df[df['Calibrator']<=ncal]).fit()
+    # Make the weights relative (dimensionless) so the standalone 1 in Eq (8) is
+    # commensurate with the other two terms; otherwise the weighted radical depends
+    # on the concentration unit. For the unweighted case this is a no-op.
+    n_weights = n_weights/np.mean(n_weights)
+    a = a/np.mean(a)
+
+    # Eq (10): weighted mean of the calibration concentrations (named column, normalized scale)
+    x_w = np.sum(n_weights*x_cal)/np.sum(n_weights)
+
+    # Eqs (9) and (11): the residuals and the slope both belong to the weighted curve
+    regr = wls(formula='y ~ x', data=sub[['x', 'y']], weights=n_weights).fit()
     S_y_x = np.sqrt(np.sum((regr.resid**2)*n_weights)/regr.df_resid)
-    s_term = 1/(s_wi)*ncal
-    b = np.sum((a*(means.x[:ncal] - (x_w*input_istd))**2))*ncal
-    t_term = ((-x_w)**2)/b
+
+    # Eq (8): both sums run over the k levels and carry the l replicates (all normalized)
+    s_term = 1/np.sum(l*a)
+    t_term = ((-x_w)**2)/np.sum(l*a*(x_i - x_w)**2)
     rad = np.sqrt(1+s_term+t_term)
     s_y0 = S_y_x*rad
+
+    # Eq (7), turned into a concentration through the slope of Eq (11), then rescaled
+    # from normalized units back to concentration by the ISTD concentration.
     t = stats.t.ppf(1-conf, regr.df_resid)
     x_lod = (t * s_y0)/regr.params['x'] * input_istd
     x_loq = x_lod * 2
@@ -300,9 +366,11 @@ def hub_vox(ncal:int, conf:float, df:pd.DataFrame, means:pd.DataFrame, result_we
     return x_lod, x_loq
 
 
-
 def precision_routine(df: pd.DataFrame, n_days: int, type:Literal['intra', 'inter'], num: Optional[int]=None):
-    #Calculate precision (intra and inter) executing the previous linearity routine
+    #Backcalculate the calibration points by leave-one-out and express the spread as CV%.
+    #The unit left out differs between the two: 'intra' drops one curve of day `num` and
+    #refits on the other curves of that same day, 'inter' drops a whole day and refits on
+    #the curves of the remaining days.
     group_days(df, n_days)
     combos = comb_intra(df, n_days)
     if type == 'intra':
@@ -322,7 +390,7 @@ def precision_routine(df: pd.DataFrame, n_days: int, type:Literal['intra', 'inte
         means_combo = means_data(new_data)
         if isinstance(variance, pd.DataFrame):
             wls_results = model_wls(new_data, means_combo, weight)
-            mandel, mandel_summary = mandel_test(wls_results['wls_lin'], wls_results['wls_quad'])
+            mandel, mandel_summary = select_model(wls_results, 'wls')
             if mandel == 'Linear':
                 model = wls_results['wls_lin']
                 x_pred = np.abs((y_val - model.params['Intercept'])/model.params['x'])
@@ -336,7 +404,7 @@ def precision_routine(df: pd.DataFrame, n_days: int, type:Literal['intra', 'inte
 
         else:
             ols_results = model_ols(new_data, means_combo)
-            mandel, mandel_summary = mandel_test(ols_results['ols_lin'], ols_results['ols_quad'])
+            mandel, mandel_summary = select_model(ols_results, 'ols')
         
 
             
@@ -387,7 +455,10 @@ def precision_routine(df: pd.DataFrame, n_days: int, type:Literal['intra', 'inte
 
 
 def accuracy_routine(df: pd.DataFrame, n_days: int, type:Literal['intra', 'inter'], num: Optional[int]=None):
-    #Calculate precision (intra and inter) executing the previous linearity routine
+    #Backcalculate the calibration points by leave-one-out and express the deviation from the
+    #spiked concentration as bias%, following Eq. (12) of Alladio et al., MethodsX 7 (2020) 100919.
+    #The unit left out differs between the two: 'intra' drops one curve of day `num` and refits on
+    #the other curves of that same day, 'inter' drops a whole day and refits on the remaining days.
     group_days(df, n_days)
     combos = comb_intra(df, n_days)
     if type == 'intra':
@@ -407,7 +478,7 @@ def accuracy_routine(df: pd.DataFrame, n_days: int, type:Literal['intra', 'inter
         means_combo = means_data(new_data)
         if isinstance(variance, pd.DataFrame):
             wls_results = model_wls(new_data, means_combo, weight)
-            mandel, mandel_summary = mandel_test(wls_results['wls_lin'], wls_results['wls_quad'])
+            mandel, mandel_summary = select_model(wls_results, 'wls')
             if mandel == 'Linear':
                 model = wls_results['wls_lin']
                 x_pred = np.abs((y_val - model.params['Intercept'])/model.params['x'])
@@ -421,7 +492,7 @@ def accuracy_routine(df: pd.DataFrame, n_days: int, type:Literal['intra', 'inter
 
         else:
             ols_results = model_ols(new_data, means_combo)
-            mandel, mandel_summary = mandel_test(ols_results['ols_lin'], ols_results['ols_quad'])
+            mandel, mandel_summary = select_model(ols_results, 'ols')
         
 
             

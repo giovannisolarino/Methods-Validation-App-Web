@@ -45,8 +45,9 @@ def make_biplot(df: pd.DataFrame, means: pd.DataFrame):
             width=600,
             showlegend=True
             )
-    fig.update_yaxes(range=[0, max(df.y)+np.diff(df.y)])
-    return fig 
+    #np.diff returns an array, so take the mean spacing to get a scalar headroom.
+    fig.update_yaxes(range=[0, max(df.y)+np.mean(np.diff(np.sort(df.y)))])
+    return fig
 
 def uloq_lloq_graph(df: pd.DataFrame):
         '''
@@ -203,9 +204,11 @@ def conf_lm(conf, df:pd.DataFrame,ncal ,weight:Optional[any]=None):
         fig.add_trace(go.Scatter(x=df.x, y = df.y, mode='markers', marker=dict(size=8),
                     hovertemplate='CAL %{text}<extra></extra>', text=df.index, name='Data means'))  
         fig.add_trace(go.Scatter(x=exog.x,y=line, mode='lines', line=dict(dash='solid', color='green'), name='Regression line'))
-        fig.add_trace(go.Scatter(x=exog.x, y= c_i.iloc[:,3], mode='lines', line=dict(dash='dash', color='red'), name='Upper confidence interval'))
-        fig.add_trace(go.Scatter(x=exog.x, y=c_i.iloc[:,2], mode='lines',line=dict(dash='dash', color='blue'), fill='tonexty',
-                     fillcolor='rgba(244, 236, 194,0.4)', name='Lower confidence interval'))
+        #Hubaux and Vos is defined on the prediction interval of a future observation,
+        #not on the confidence interval of the fitted mean.
+        fig.add_trace(go.Scatter(x=exog.x, y=c_i['obs_ci_upper'], mode='lines', line=dict(dash='dash', color='red'), name='Upper prediction interval'))
+        fig.add_trace(go.Scatter(x=exog.x, y=c_i['obs_ci_lower'], mode='lines',line=dict(dash='dash', color='blue'), fill='tonexty',
+                     fillcolor='rgba(244, 236, 194,0.4)', name='Lower prediction interval'))
         fig.update_layout(
                 title_text='Prediction interval',
                 title_x = 0.5,

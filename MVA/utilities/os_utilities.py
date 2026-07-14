@@ -16,20 +16,17 @@ def create_documents_directory(directory_name = 'MVAStorage'):
         directory_name: string containing new directory's name, default 'MVAStorage'
     
     Returns:
-        None if directory doesn't exist.
-        New directory's path if directory exists. 
+        The directory's path, creating it first if it doesn't exist.
     '''
-    # Obtain documents path 
+    # Obtain documents path
     documents_path = Path(user_documents_dir())
-    
+
     # Create new directory's path
     new_directory_path = documents_path / directory_name
-    
-    # Create new directory id doesn't exist
-    if not new_directory_path.exists():
-        new_directory_path.mkdir(parents=True)
-    else:
-        return new_directory_path
+
+    # Create new directory if it doesn't exist
+    new_directory_path.mkdir(parents=True, exist_ok=True)
+    return new_directory_path
 
     
 
@@ -46,4 +43,4 @@ def load_files_from_folder():
         file_list = os.listdir(path)
         return file_list, path
     else:
-        raise FileExistsError
+        raise FileNotFoundError(f'Storage directory not found: {path}')

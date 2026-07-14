@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+.venv/
+
+# NiceGUI runtime dir: holds each user's persisted session, i.e. a full copy of their dataset
+MVA/.nicegui/
