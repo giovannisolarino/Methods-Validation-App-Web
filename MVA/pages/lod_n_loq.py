@@ -2,7 +2,7 @@ import theme
 import asyncio
 from utilities.pd_utilities import means_data
 from utilities.stat_test import hub_vox, levene_test, weight_sel
-from utilities.plotly_utilities import conf_lm
+from utilities.plotly_utilities import conf_lm, hd_plot
 import pandas as pd
 from nicegui import ui, app, events
 
@@ -87,7 +87,7 @@ def lod_loq():
             await asyncio.sleep(4)
             spin.delete()
             with ui.card():
-                ui.plotly(fig)
+                hd_plot(fig)
 
     with theme.frame('LOD and LOQ'):
         ui.markdown('## **LOD and LOQ - Hubaux and Vos Method**')

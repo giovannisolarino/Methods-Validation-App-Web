@@ -2,9 +2,9 @@ import theme
 import asyncio
 import pandas as pd
 from utilities.pd_utilities import means_data, display_df
-from utilities.plotly_utilities import make_biplot, uloq_lloq_graph, show_model, residual_graph, kde_resid, q_qplot
+from utilities.plotly_utilities import make_biplot, uloq_lloq_graph, show_model, residual_graph, kde_resid, q_qplot, hd_plot
 from utilities.stat_test import (levene_test, f_test_sced, weight_sel, model_wls, model_ols,
-                                 shapiro_wilk, select_model, double_check)
+                                 shapiro_wilk, select_model)
 from nicegui import ui, app
 
 
@@ -27,18 +27,18 @@ def linearity():
             ui.spinner(size='lg')
             ui.label("Processing graph...").classes('text-bold')
         await asyncio.sleep(2)
-        ui.plotly(cal_plot)
+        hd_plot(cal_plot)
         spin_row.delete()
 
     #WLS and OLS drove two near-identical copies of every handler below. The only difference is
     #the key prefix in the results dict, so `kind` carries it and one copy serves both.
     def best_model():
-        #Perform Mandel's test (with the residual double check) and show the best model
+        #Perform Mandel's test (with the residual double check) and show the best model.
+        #data_stat is non-empty only when the double check actually overturned Mandel, and the
+        #card below is the only thing telling the user why the plot disagrees with the table.
+        #It used to be guarded on the post-override verdict, so it could never render.
         update_name_button(dpbutton, 'Best calibration model')
-        mandel, mandel_summary = select_model(results, kind)
-        data_stat = None
-        if mandel == 'Quadratic':
-            _, data_stat = double_check(results[f'{kind}_lin_raw'], results[f'{kind}_quad_raw'])
+        mandel, mandel_summary, data_stat = select_model(results, kind)
 
         if mandel == 'Quadratic':
             best_summary = pd.DataFrame({
@@ -67,7 +67,7 @@ def linearity():
 
         with plot:
             plot.clear()
-            ui.markdown('### Best Model')
+            ui.markdown(f'### Best model: {mandel}')
             with ui.row():
                 ui.table.from_pandas(mandel_summary.round(2), title='Mandel test').classes(replace='text-align: center').props('flat').style('width:350px')
                 ui.element('div').style('width: 300px; visibility: hidden;')
@@ -81,7 +81,7 @@ def linearity():
                                     ''')
                         ui.table.from_pandas(data_stat.round(4)).classes(replace='text-align: center').props('flat').style('width:300px')
             ui.table.from_pandas(best_summary.round(4)).classes(replace='text-align: center').props('flat').style('width:350px')
-            ui.plotly(model)
+            hd_plot(model)
 
     def show_plot(trend: str):
         #trend is 'lin' or 'quad'
@@ -122,11 +122,11 @@ def linearity():
                 with ui.card(align_items='center').style('background-color:#84fa84').classes('top-padding: 50px'):
                     ui.icon('info')
                     ui.markdown(f'**{info}**')
-            ui.plotly(model)
+            hd_plot(model)
             with ui.row():
-                ui.plotly(residuals)
+                hd_plot(residuals)
                 kde_resid(model=results[f'{kind}_{name}_raw'], trend=label)
-            ui.plotly(qqplot)
+            hd_plot(qqplot)
 
     with theme.frame('Linearity'):
         ui.markdown('## **Calibration study**')
@@ -158,7 +158,7 @@ def linearity():
                         graph_uloq_lloq = uloq_lloq_graph(df)
                         with ui.row():
                             ui.table.from_pandas(f_sced, title='F-test').classes(replace='text-align: center').style('max-height: 200px; max-width: 200px').props('flat')
-                            ui.plotly(graph_uloq_lloq)
+                            hd_plot(graph_uloq_lloq)
                     with ui.tab_panel('W'):
                         variance, result, weight = weight_sel(df)
                         if isinstance(variance, pd.DataFrame):

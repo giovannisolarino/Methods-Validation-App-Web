@@ -1,15 +1,11 @@
 import pandas as pd
 import numpy as np
 import warnings
-from scikit_posthocs import posthoc_tukey
-from statannotations.Annotator import Annotator
 from nicegui import ui, app
 from typing import Literal, Optional
 from utilities.pd_utilities import comb_intra, gen_combinations, means_data, group_days
-import numpy as np
 import scipy.stats as stats
 import statsmodels.api as sm
-from statsmodels.regression.linear_model import RegressionResultsWrapper
 from statsmodels.formula.api import ols, wls
 
 
@@ -64,12 +60,16 @@ def f_test_sced(df: pd.DataFrame):
     groups = grouping(df)
     LLOQ = min(groups.keys())
     ULOQ = max(groups.keys())
-    if groups[LLOQ].var() == 0:
+    #Sample variances (ddof=1): the F-test compares estimates of the population variances,
+    #and numpy's default ddof=0 only cancels out of the ratio when the two levels carry the
+    #same number of replicates.
+    var_lloq = groups[LLOQ].var(ddof=1)
+    if var_lloq == 0:
         p = 1
     else:
-        f = groups[ULOQ].var()/groups[LLOQ].var() 
-        dfn = groups[ULOQ].size-1  
-        dfd = groups[LLOQ].size-1  
+        f = groups[ULOQ].var(ddof=1)/var_lloq
+        dfn = groups[ULOQ].size-1
+        dfd = groups[LLOQ].size-1
         p = 1-stats.f.cdf(f, dfn, dfd)
 
     if not np.isfinite(p):
@@ -175,16 +175,27 @@ def mandel_test(lin_mod, quad_mod):
     #On a tie the quadratic term brings no significant improvement, so keep the simpler model.
     result = 'Quadratic' if F_mandel > F_critic else 'Linear'
 
+    #'Mandel outcome', not 'Best model': this table reports what Mandel's F says, and the residual
+    #double check downstream can still overturn it. Labelling it as the final choice is what made
+    #the page read 'Best model is Quadratic' above a linear plot.
     mandel_summary = pd.DataFrame({
         'F-Mandel' : [F_mandel],
         'F-critic' : [F_critic],
-        'Result': [f'Best model is {result}']
+        'Mandel outcome': [f'{result}']
     })
 
     return result, mandel_summary
 
 def double_check(lin_mod, quad_mod):
-    t_test = stats.ttest_rel(lin_mod.wresid, quad_mod.wresid)
+    #Paired on the ABSOLUTE residuals, point by point: does the quadratic term actually shrink the
+    #typical error of the fit?
+    #
+    #On the signed residuals the same test is vacuous. Both fits carry an intercept, so both sets of
+    #residuals sum to zero, and the paired differences therefore have mean exactly zero: the test
+    #returns t = 0, p = 1 for every dataset that has ever been or will ever be passed to it. That is
+    #an algebraic identity, not evidence of agreement, and it left the whole decision resting on the
+    #F-test below.
+    t_test = stats.ttest_rel(np.abs(lin_mod.wresid), np.abs(quad_mod.wresid))
     ftest = f_test(lin_mod.wresid, quad_mod.wresid)
 
     if t_test.pvalue > 0.01 and ftest > 0.01:
@@ -206,18 +217,32 @@ def select_model(results: dict, kind: Literal['wls', 'ols']):
     #Alladio et al.; running it on the level means instead leaves 2 residual degrees of
     #freedom and a different F-critic. When it calls quadratic, the residual double check
     #falls back to the simpler model if the two fits are statistically indistinguishable.
+    #
+    #Returns the verdict, Mandel's own summary table, and the double check's numbers when the
+    #override actually fired (None otherwise). The caller needs that third value: without it the
+    #page cannot tell a plain 'Linear' from a 'Quadratic' that was demoted, and it ends up showing
+    #a Mandel table that reads Quadratic above a linear plot, with nothing to explain the gap.
     mandel, summary = mandel_test(results[f'{kind}_lin_raw'], results[f'{kind}_quad_raw'])
+    data_stat = None
     if mandel == 'Quadratic':
-        fallback, _ = double_check(results[f'{kind}_lin_raw'], results[f'{kind}_quad_raw'])
+        fallback, data_stat = double_check(results[f'{kind}_lin_raw'], results[f'{kind}_quad_raw'])
         if fallback == 'Linear':
             mandel = 'Linear'
-    return mandel, summary
+    return mandel, summary, data_stat
+
+
+def curve_grids(means: pd.DataFrame, n: int = 200):
+    #The x grids the fitted lines are evaluated on. A quadratic drawn through 10 points reads as
+    #a polyline, so the grid is dense. show_model() plots against these same grids, hence the one
+    #definition: when the two disagreed the curve was silently drawn against the wrong abscissa.
+    #means_x spans the calibration range, extended_x extrapolates past the ULOQ as before.
+    up = (max(means.x))+(max(means.x)-min(means.x))
+    return np.linspace(min(means.x), max(means.x), n), np.linspace(-0.5, up, n)
 
 
 def model_wls(df:pd.DataFrame, means: pd.DataFrame, weight: pd.Series):
     #WLS model
-    up = (max(means.x))+(max(means.x)-min(means.x))
-    extended_x = np.linspace(-0.5, up, 10)
+    means_x, extended_x = curve_grids(means)
 
     #Hand patsy only the two columns the formulas name. The frame still carries the user's
     #original concentration/analyte/ISTD headers, and a column called I, C or Q shadows the
@@ -227,18 +252,20 @@ def model_wls(df:pd.DataFrame, means: pd.DataFrame, weight: pd.Series):
 
     wls_lin_means = wls(formula = 'y ~ x',data=means, weights=weight).fit()
     wls_lin_raw = wls(formula='y ~ x', data=fit_data, weights=df['Weight']).fit()
-    line_wls_lin_means = wls_lin_means.params['Intercept'] + wls_lin_means.params['x']*means.x
+    line_wls_lin_means = wls_lin_means.params['Intercept'] + wls_lin_means.params['x']*means_x
     line_wls_lin_raw = wls_lin_raw.params['Intercept'] + wls_lin_raw.params['x']*extended_x
     equation_lin = f"y = {wls_lin_means.params['Intercept']:.4f} + {wls_lin_means.params['x']:.4f}x"
-    r_squared_lin = f"R\u00b2: {wls_lin_means.rsquared:.4f}"
+    #R\u00b2 comes from the fit on the raw n = k*l standards, not on the k level means. Averaging the
+    #replicates away removes the within-level scatter from the residuals, which inflates R\u00b2.
+    r_squared_lin = f"R\u00b2: {wls_lin_raw.rsquared:.4f}"
     
 
     wls_quad_means = wls(formula='y ~ x + I(x**2)', data=means, weights=weight).fit()
     wls_quad_raw = wls(formula='y ~ x + I(x**2)', data=fit_data, weights=df['Weight']).fit()
-    line_wls_quad_means = wls_quad_means.params['Intercept'] + wls_quad_means.params['x']*means.x + wls_quad_means.params['I(x ** 2)']*((means.x)**2)
+    line_wls_quad_means = wls_quad_means.params['Intercept'] + wls_quad_means.params['x']*means_x + wls_quad_means.params['I(x ** 2)']*((means_x)**2)
     line_wls_quad_raw = wls_quad_raw.params['Intercept'] + wls_quad_raw.params['x']*extended_x + wls_quad_raw.params['I(x ** 2)']*((extended_x)**2)
     equation_quad = f"y = {wls_quad_means.params['Intercept']:.4f} + {wls_quad_means.params['x']:.4f}x + {wls_quad_means.params['I(x ** 2)']:.4f}x\u00b2"
-    r_squared_quad = f"R\u00b2: {wls_quad_means.rsquared:.4f}"
+    r_squared_quad = f"R\u00b2: {wls_quad_raw.rsquared:.4f}"
 
 
     
@@ -260,8 +287,7 @@ def model_wls(df:pd.DataFrame, means: pd.DataFrame, weight: pd.Series):
 
 def model_ols(df:pd.DataFrame, means: pd.DataFrame):
     #OLS model
-    up = (max(means.x))+(max(means.x)-min(means.x))
-    extended_x = np.linspace(-0.5, up, 10)
+    means_x, extended_x = curve_grids(means)
 
     #See model_wls: patsy resolves names against the data frame first, so a user column
     #named I, C or Q would shadow the patsy builtin and break I(x**2).
@@ -269,18 +295,19 @@ def model_ols(df:pd.DataFrame, means: pd.DataFrame):
 
     ols_lin_means = ols(formula = 'y ~ x',data=means).fit()
     ols_lin_raw = ols(formula='y ~ x', data=fit_data).fit()
-    line_ols_lin_means = ols_lin_means.params['Intercept'] + ols_lin_means.params['x']*means.x
+    line_ols_lin_means = ols_lin_means.params['Intercept'] + ols_lin_means.params['x']*means_x
     line_ols_lin_raw = ols_lin_raw.params['Intercept'] + ols_lin_raw.params['x']*extended_x
     equation_lin = f"y = {ols_lin_means.params['Intercept']:.4f} + {ols_lin_means.params['x']:.4f}x"
-    r_squared_lin = f"R\u00b2: {ols_lin_means.rsquared:.4f}"
+    #See model_wls: R\u00b2 belongs to the raw fit, the means fit hides the within-level scatter.
+    r_squared_lin = f"R\u00b2: {ols_lin_raw.rsquared:.4f}"
     
 
     ols_quad_means = ols(formula='y ~ x + I(x**2)', data=means).fit()
     ols_quad_raw = ols(formula='y ~ x + I(x**2)', data=fit_data).fit()
-    line_ols_quad_means = ols_quad_means.params['Intercept'] + ols_quad_means.params['x']*means.x + ols_quad_means.params['I(x ** 2)']*((means.x)**2)
+    line_ols_quad_means = ols_quad_means.params['Intercept'] + ols_quad_means.params['x']*means_x + ols_quad_means.params['I(x ** 2)']*((means_x)**2)
     line_ols_quad_raw = ols_quad_raw.params['Intercept'] + ols_quad_raw.params['x']*extended_x + ols_quad_raw.params['I(x ** 2)']*((extended_x)**2)
     equation_quad = f"y = {ols_quad_means.params['Intercept']:.4f} + {ols_quad_means.params['x']:.4f}x + {ols_quad_means.params['I(x ** 2)']:.4f}x\u00b2"
-    r_squared_quad = f"R\u00b2: {ols_quad_means.rsquared:.4f}"
+    r_squared_quad = f"R\u00b2: {ols_quad_raw.rsquared:.4f}"
 
 
     
@@ -390,7 +417,7 @@ def precision_routine(df: pd.DataFrame, n_days: int, type:Literal['intra', 'inte
         means_combo = means_data(new_data)
         if isinstance(variance, pd.DataFrame):
             wls_results = model_wls(new_data, means_combo, weight)
-            mandel, mandel_summary = select_model(wls_results, 'wls')
+            mandel, _, _ = select_model(wls_results, 'wls')
             if mandel == 'Linear':
                 model = wls_results['wls_lin']
                 x_pred = np.abs((y_val - model.params['Intercept'])/model.params['x'])
@@ -404,7 +431,7 @@ def precision_routine(df: pd.DataFrame, n_days: int, type:Literal['intra', 'inte
 
         else:
             ols_results = model_ols(new_data, means_combo)
-            mandel, mandel_summary = select_model(ols_results, 'ols')
+            mandel, _, _ = select_model(ols_results, 'ols')
         
 
             
@@ -478,7 +505,7 @@ def accuracy_routine(df: pd.DataFrame, n_days: int, type:Literal['intra', 'inter
         means_combo = means_data(new_data)
         if isinstance(variance, pd.DataFrame):
             wls_results = model_wls(new_data, means_combo, weight)
-            mandel, mandel_summary = select_model(wls_results, 'wls')
+            mandel, _, _ = select_model(wls_results, 'wls')
             if mandel == 'Linear':
                 model = wls_results['wls_lin']
                 x_pred = np.abs((y_val - model.params['Intercept'])/model.params['x'])
@@ -492,7 +519,7 @@ def accuracy_routine(df: pd.DataFrame, n_days: int, type:Literal['intra', 'inter
 
         else:
             ols_results = model_ols(new_data, means_combo)
-            mandel, mandel_summary = select_model(ols_results, 'ols')
+            mandel, _, _ = select_model(ols_results, 'ols')
         
 
             

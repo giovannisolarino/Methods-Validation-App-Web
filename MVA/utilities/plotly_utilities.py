@@ -1,20 +1,72 @@
 import sys
+import copy
 from nicegui import ui
 import matplotlib
 if getattr(sys, 'frozen', False):
-    matplotlib.use('svg') 
+    matplotlib.use('svg')
 import pandas as pd
 import numpy as np
 import io
 from PIL import Image
-from statannotations.Annotator import Annotator
 from typing import Literal, Optional
 import matplotlib.pyplot as plt
-import seaborn as sns
 import plotly.express as px
 import plotly.io as pio
-pio.templates.default = "simple_white"
 import plotly.graph_objects as go
+
+#Font sizes live in the template every figure already inherits, so one place sets them for all
+#the plots. The figures below only pass title/axis strings, never a font, so nothing overrides
+#this. Deep copy because pio.templates['simple_white'] is the shared built-in.
+MVA_TEMPLATE = copy.deepcopy(pio.templates['simple_white'])
+MVA_TEMPLATE.layout.font.size = 16                  #legend, hover, anything unspecified
+MVA_TEMPLATE.layout.title.font.size = 24
+MVA_TEMPLATE.layout.xaxis.title.font.size = 20
+MVA_TEMPLATE.layout.yaxis.title.font.size = 20
+MVA_TEMPLATE.layout.xaxis.tickfont.size = 16
+MVA_TEMPLATE.layout.yaxis.tickfont.size = 16
+pio.templates['mva'] = MVA_TEMPLATE
+pio.templates.default = 'mva'
+
+#The KDE residuals plot is the only matplotlib figure, and it is redrawn on every call after
+#plt.style.use(), which resets rcParams. Hence the sizes are re-applied there, not here.
+MPL_FONTS = {'font.size': 14, 'axes.titlesize': 18, 'axes.labelsize': 16,
+             'xtick.labelsize': 13, 'ytick.labelsize': 13}
+
+#Plotly's own modebar already downloads a figure: the camera icon. Left alone it exports a PNG at
+#the on-screen pixel size, which is what makes the saved file look poor. Raising the scale is the
+#whole fix, no export code of ours. scale=4 on a 1200x800 figure is a 4800x3200 PNG, ~300 dpi at
+#full page width.
+PLOT_CONFIG = {
+    'displaylogo': False,
+    'toImageButtonOptions': {'format': 'png', 'scale': 4, 'filename': 'MVA_plot'},
+}
+
+
+def hd_plot(fig, filename: Optional[str] = None, format: str = 'png'):
+    '''
+    Render a Plotly figure with the high-resolution download button enabled.
+
+    Not named plot(): the pages use `plot` for the ui.element container the figures are drawn
+    into, and a local of that name shadows the import.
+
+    NiceGUI serialises a go.Figure to {data, layout} and never sets a config, so the modebar falls
+    back to its defaults. Handing it a dict with a 'config' key is the only way to reach the export
+    settings. Use this instead of ui.plotly() so every plot in the app downloads at the same quality.
+
+    Params:
+        fig: Plotly Graph Object Figure
+        filename: name of the downloaded file, defaults to the figure title
+        format: 'png' for a raster image, 'svg' for a vector one (scale is then irrelevant)
+
+    Returns:
+        The ui.plotly element
+    '''
+
+    config = copy.deepcopy(PLOT_CONFIG)
+    config['toImageButtonOptions']['format'] = format
+    title = fig.layout.title.text
+    config['toImageButtonOptions']['filename'] = filename or (title.replace(' ', '_') if title else 'MVA_plot')
+    return ui.plotly({**fig.to_plotly_json(), 'config': config})
 from statsmodels.graphics.gofplots import qqplot
 from statsmodels.formula.api import ols, wls
 
@@ -83,11 +135,14 @@ def uloq_lloq_graph(df: pd.DataFrame):
         return fig
 
 def show_model(df:pd.DataFrame, means:pd.DataFrame, line_means:list, line_raw:list, model: str, equation:str, r_squared: str):
-        up = (max(means.x))+(max(means.x)-min(means.x))
-        extended_x = np.linspace(-0.5, up, 10)
+        #The abscissas come from stat_test, which evaluated the two lines on them. Recomputing
+        #them here is how the curve ends up drawn against the wrong x as soon as either side
+        #changes its grid.
+        from utilities.stat_test import curve_grids
+        means_x, extended_x = curve_grids(means)
         fig = make_biplot(df, means)
-        fig.add_trace(go.Scatter(x=means['x'], y=line_means, 
-                                mode='lines', name=f'{model} data means', 
+        fig.add_trace(go.Scatter(x=means_x, y=line_means,
+                                mode='lines', name=f'{model} data means',
                                 line=dict(dash='solid', color='blue')))
         fig.add_trace(go.Scatter(x=extended_x, y=line_raw, mode='lines',
                                 name=f'{model} data raw', 
@@ -112,8 +167,8 @@ def show_model(df:pd.DataFrame, means:pd.DataFrame, line_means:list, line_raw:li
                text=f'<b>{equation}<b>',
                showarrow=False,
                align='left',
-               font=dict(size=16)
-        )        
+               font=dict(size=20)
+        )
 
         fig.add_annotation(
                x=0.9,
@@ -123,7 +178,7 @@ def show_model(df:pd.DataFrame, means:pd.DataFrame, line_means:list, line_raw:li
                text=f'<b>{r_squared}<b>',
                showarrow=False,
                align='left',
-               font=dict(size=16, color='red')
+               font=dict(size=20, color='red')
         )
 
         return fig  
@@ -151,6 +206,7 @@ def kde_resid(model, trend:str):
         kde = kde(x=model.wresid)
         with ui.pyplot().style('width:500px').classes('top-padding: 40px'):
                plt.style.use('seaborn-white')
+               plt.rcParams.update(MPL_FONTS)
                plt.plot(kde.support, kde.density)
                plt.xlabel('Residuals')
                plt.ylabel('Density')
@@ -187,11 +243,20 @@ def q_qplot(model, df:pd.DataFrame):
 
 def conf_lm(conf, df:pd.DataFrame,ncal ,weight:Optional[any]=None):
         df = df.iloc[:ncal]
-        exog = pd.DataFrame(np.append(0, df.x), columns=['x'])
-        
+
+        #The prediction band is a hyperbola in x, so it needs a dense abscissa: evaluated only at
+        #the calibration levels it was drawn as straight segments, which flattens the waist of the
+        #band right around x = 0, where the LOD is read off. The grid still starts at 0 and ends at
+        #the last calibrator used, so the band is unchanged at those points, only filled in between.
+        grid = np.linspace(0, max(df.x), 200)
+        exog = pd.DataFrame({'x': grid})
+
         if weight is not None:
                 weight = weight.iloc[:ncal]
-                weight_lod = np.append(1, weight)
+                #The model is fitted on the calibration levels exactly as before. Only the weights
+                #the band is *predicted* with need a value at each grid point, interpolated between
+                #the nodes the code already used: 1 at x = 0, then the per-level weights.
+                weight_lod = np.interp(grid, np.append(0, df.x.values), np.append(1, weight.values))
                 regr = wls(formula='y ~ x',data= df, weights = weight).fit()
                 c_i = regr.get_prediction(exog = exog, transform=True, weights = weight_lod).summary_frame(alpha=conf)
 
