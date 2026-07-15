@@ -18,13 +18,8 @@ def create_documents_directory(directory_name = 'MVAStorage'):
     Returns:
         The directory's path, creating it first if it doesn't exist.
     '''
-    # Obtain documents path
     documents_path = Path(user_documents_dir())
-
-    # Create new directory's path
     new_directory_path = documents_path / directory_name
-
-    # Create new directory if it doesn't exist
     new_directory_path.mkdir(parents=True, exist_ok=True)
     return new_directory_path
 

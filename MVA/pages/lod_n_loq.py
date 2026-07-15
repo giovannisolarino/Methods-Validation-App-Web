@@ -1,5 +1,4 @@
 import theme
-import asyncio
 from utilities.pd_utilities import means_data
 from utilities.stat_test import hub_vox, levene_test, weight_sel
 from utilities.plotly_utilities import conf_lm, hd_plot
@@ -15,21 +14,17 @@ LOQ_INFO = ('The LOQ is obtained by multiplying the LOD value by two. \n'
 
 
 def lod_loq():
-    #Per-user state (dataframe, computed LOD/LOQ, cards) is local to the page function, so
-    #concurrent clients each get their own. As module globals one user's run overwrote another's.
     try:
         df = pd.read_json(app.storage.user['df'])
         means = means_data(df)
         conc_name = app.storage.user['conc_name']
     except:
         df = None
-        ui.notify('Data not found', type='negative', position='center')
 
     #Mutable box for the results, so the checkbox handler can read what show_hub_vox computed.
     state = {}
 
     def change_loq(e: events.ValueChangeEventArguments):
-        #Handle changes in using first calibrator as LOQ
         if e.value:
             loq = df[f'{conc_name}'].min()
         else:
@@ -41,15 +36,13 @@ def lod_loq():
             ui.table.from_pandas(table.round(2), title='Hubaux and Vos calculation').classes(replace='text-align: center').props('flat').style('width:300px; height:200px')
 
     async def show_hub_vox():
-        #Show Hubaux and Vos table, handle change in points and alpha value.
-        #ncal falls back to 3 when the dataset carries only three calibration levels, which is
-        #also the only choice the radio offers in that case.
+        #cal_num is None when the dataset carries only three calibration levels, and 3 is then
+        #also the only choice the radio would offer.
         ncal = int(cal_num.value) if cal_num is not None else 3
         card.clear()
         card_plot.clear()
         with card:
             ui.skeleton(width='300px', height='200px')
-            await asyncio.sleep(3)
             lod, loq = hub_vox(ncal=ncal, conf=alpha.value, df=df, means=means, result_weight=result_weight)
             card.clear()
             state['lod'], state['loq'] = lod, loq
@@ -68,7 +61,7 @@ def lod_loq():
                                                                   close_button='OK',
                                                                   classes='multi-line-notification')).props('flat')
 
-            #Notifying straight away: sleeping first lets the user navigate away, and the
+            #Notify straight away: sleeping first lets the user navigate away, and the
             #notification then targets a client NiceGUI has already deleted.
             if loq > df[f'{conc_name}'].min():
                 ui.notify('Computed LOQ is higher than your first calibration point!', position='center', timeout=0, close_button='OK', type='warning')
@@ -76,15 +69,13 @@ def lod_loq():
             if lod > df[f'{conc_name}'].min():
                 ui.notify('Computed LOD is higher than your first calibration point!', position='center', timeout=0, close_button='OK', type='warning')
 
-        if isinstance(weight, pd.Series):
-            fig = conf_lm(conf=alpha.value, df=means, weight=weight, ncal=ncal)
-        else:
-            fig = conf_lm(conf=alpha.value, df=means, ncal=ncal)
-
         with card_plot:
             card_plot.clear()
             spin = ui.spinner('bars', thickness=10, size='3em')
-            await asyncio.sleep(4)
+            if isinstance(weight, pd.Series):
+                fig = conf_lm(conf=alpha.value, df=means, weight=weight, ncal=ncal)
+            else:
+                fig = conf_lm(conf=alpha.value, df=means, ncal=ncal)
             spin.delete()
             with ui.card():
                 hd_plot(fig)
@@ -98,7 +89,7 @@ def lod_loq():
             variance, result_weight, weight = weight_sel(df)
             cal_num = None
             with ui.grid(columns='auto 2fr'):
-                alpha = ui.number('Statical significance level', value=0.05, on_change=show_hub_vox).bind_value_to(app.storage.user, 'alpha')
+                alpha = ui.number('Statistical significance level', value=0.05, on_change=show_hub_vox).bind_value_to(app.storage.user, 'alpha')
                 if df['Calibrator'].nunique() > 3:
                     with ui.column():
                         ui.label('Number of calibrators to use in Hubaux and Vos algorithm')
@@ -108,3 +99,5 @@ def lod_loq():
                 card = ui.card()
                 card_plot = ui.element('div')
                 ui.timer(0, callback=show_hub_vox, once=True)
+        else:
+            theme.data_required_prompt()

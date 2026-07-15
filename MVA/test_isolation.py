@@ -14,8 +14,7 @@ PAGES = pathlib.Path(__file__).parent / 'pages'
 
 def test_no_globals_in_pages():
     #Per-user state in a module-level global is shared by every client of the process: a second
-    #user opening a page rebinds the first user's dataframe and UI elements. Page state must
-    #live in the page function, where each client gets its own.
+    #user opening a page rebinds the first user's dataframe and UI elements.
     offenders = []
     for path in PAGES.glob('*.py'):
         tree = ast.parse(path.read_text(encoding='utf-8'))
@@ -26,9 +25,8 @@ def test_no_globals_in_pages():
 
 
 def test_downloads_are_bytes_not_shared_paths():
-    #Templates and result tables used to be written to fixed paths under .nicegui/, so two users
-    #generating them at once overwrote each other and could download the wrong file. They are
-    #built in memory now.
+    #Written to a fixed path under .nicegui/, two users generating a template at once overwrite
+    #each other and download the wrong file.
     from utilities.pd_utilities import template_xlsx, tables_xlsx
 
     template = template_xlsx(levels=3, replicates=2, columns=('Matrix', 'No-Matrix'))

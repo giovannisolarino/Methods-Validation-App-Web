@@ -14,9 +14,7 @@ import plotly.express as px
 import plotly.io as pio
 import plotly.graph_objects as go
 
-#Font sizes live in the template every figure already inherits, so one place sets them for all
-#the plots. The figures below only pass title/axis strings, never a font, so nothing overrides
-#this. Deep copy because pio.templates['simple_white'] is the shared built-in.
+#Deep copy: pio.templates['simple_white'] is the shared built-in.
 MVA_TEMPLATE = copy.deepcopy(pio.templates['simple_white'])
 MVA_TEMPLATE.layout.font.size = 16                  #legend, hover, anything unspecified
 MVA_TEMPLATE.layout.title.font.size = 24
@@ -27,15 +25,12 @@ MVA_TEMPLATE.layout.yaxis.tickfont.size = 16
 pio.templates['mva'] = MVA_TEMPLATE
 pio.templates.default = 'mva'
 
-#The KDE residuals plot is the only matplotlib figure, and it is redrawn on every call after
-#plt.style.use(), which resets rcParams. Hence the sizes are re-applied there, not here.
+#Re-applied inside kde_resid() on every call: plt.style.use() there resets rcParams.
 MPL_FONTS = {'font.size': 14, 'axes.titlesize': 18, 'axes.labelsize': 16,
              'xtick.labelsize': 13, 'ytick.labelsize': 13}
 
-#Plotly's own modebar already downloads a figure: the camera icon. Left alone it exports a PNG at
-#the on-screen pixel size, which is what makes the saved file look poor. Raising the scale is the
-#whole fix, no export code of ours. scale=4 on a 1200x800 figure is a 4800x3200 PNG, ~300 dpi at
-#full page width.
+#scale=4 on a 1200x800 figure is a 4800x3200 PNG, ~300 dpi at full page width. Without it the
+#modebar's camera icon exports at the on-screen pixel size.
 PLOT_CONFIG = {
     'displaylogo': False,
     'toImageButtonOptions': {'format': 'png', 'scale': 4, 'filename': 'MVA_plot'},
@@ -44,14 +39,8 @@ PLOT_CONFIG = {
 
 def hd_plot(fig, filename: Optional[str] = None, format: str = 'png'):
     '''
-    Render a Plotly figure with the high-resolution download button enabled.
-
-    Not named plot(): the pages use `plot` for the ui.element container the figures are drawn
-    into, and a local of that name shadows the import.
-
-    NiceGUI serialises a go.Figure to {data, layout} and never sets a config, so the modebar falls
-    back to its defaults. Handing it a dict with a 'config' key is the only way to reach the export
-    settings. Use this instead of ui.plotly() so every plot in the app downloads at the same quality.
+    Render a Plotly figure with the high-resolution download button enabled. Use instead of
+    ui.plotly(), which never sets a config, so the modebar exports at its defaults.
 
     Params:
         fig: Plotly Graph Object Figure
@@ -81,7 +70,6 @@ def make_biplot(df: pd.DataFrame, means: pd.DataFrame):
     Returns:
         Plotly Graph Object Figure
     '''
-    #Create plotly graph for pure data
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df['x'], y=df['y'], mode='markers',
                 marker=dict(symbol='square', color='red', opacity=0.5), name='Data raw'))
@@ -97,7 +85,6 @@ def make_biplot(df: pd.DataFrame, means: pd.DataFrame):
             width=600,
             showlegend=True
             )
-    #np.diff returns an array, so take the mean spacing to get a scalar headroom.
     fig.update_yaxes(range=[0, max(df.y)+np.mean(np.diff(np.sort(df.y)))])
     return fig
 
@@ -111,7 +98,6 @@ def uloq_lloq_graph(df: pd.DataFrame):
         Returns:
             Plotly Graph Object Figure
         '''
-        #Create graph to compare ULOQ and LLOQ
         min_calibrator = df['Calibrator'].min()
         max_calibrator = df['Calibrator'].max()
         min_calibrator = df[df['Calibrator'].isin([min_calibrator])]
@@ -135,9 +121,8 @@ def uloq_lloq_graph(df: pd.DataFrame):
         return fig
 
 def show_model(df:pd.DataFrame, means:pd.DataFrame, line_means:list, line_raw:list, model: str, equation:str, r_squared: str):
-        #The abscissas come from stat_test, which evaluated the two lines on them. Recomputing
-        #them here is how the curve ends up drawn against the wrong x as soon as either side
-        #changes its grid.
+        #The same grids the caller evaluated the two lines on. Recomputing them here would draw
+        #the curves against the wrong abscissa as soon as either side changed its grid.
         from utilities.stat_test import curve_grids
         means_x, extended_x = curve_grids(means)
         fig = make_biplot(df, means)
@@ -184,7 +169,6 @@ def show_model(df:pd.DataFrame, means:pd.DataFrame, line_means:list, line_raw:li
         return fig  
         
 def residual_graph(means: pd.DataFrame, model, trend:str):
-        #Display reasiduals graph
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=means['x'], y = model.wresid, mode='markers', marker=dict(size=10),
                                 hovertemplate='CAL %{text}<extra></extra>', text=means.index))
@@ -201,7 +185,6 @@ def residual_graph(means: pd.DataFrame, model, trend:str):
         return fig
 
 def kde_resid(model, trend:str):
-        #Kernel Density residuals graph
         from utilities.stat_test import kde
         kde = kde(x=model.wresid)
         with ui.pyplot().style('width:500px').classes('top-padding: 40px'):
@@ -214,7 +197,6 @@ def kde_resid(model, trend:str):
 
 
 def q_qplot(model, df:pd.DataFrame):
-        #QQ-plot
         qqplot_data = qqplot(model.wresid, line='s').gca().lines
 
         fig = go.Figure()
@@ -244,18 +226,16 @@ def q_qplot(model, df:pd.DataFrame):
 def conf_lm(conf, df:pd.DataFrame,ncal ,weight:Optional[any]=None):
         df = df.iloc[:ncal]
 
-        #The prediction band is a hyperbola in x, so it needs a dense abscissa: evaluated only at
-        #the calibration levels it was drawn as straight segments, which flattens the waist of the
-        #band right around x = 0, where the LOD is read off. The grid still starts at 0 and ends at
-        #the last calibrator used, so the band is unchanged at those points, only filled in between.
+        #The prediction band is a hyperbola in x, so it needs a dense abscissa: drawn only through
+        #the calibration levels it becomes straight segments, flattening the waist of the band at
+        #x = 0, where the LOD is read off.
         grid = np.linspace(0, max(df.x), 200)
         exog = pd.DataFrame({'x': grid})
 
         if weight is not None:
                 weight = weight.iloc[:ncal]
-                #The model is fitted on the calibration levels exactly as before. Only the weights
-                #the band is *predicted* with need a value at each grid point, interpolated between
-                #the nodes the code already used: 1 at x = 0, then the per-level weights.
+                #The band is predicted at every grid point, so it needs a weight there too:
+                #interpolated between 1 at x = 0 and the per-level weights.
                 weight_lod = np.interp(grid, np.append(0, df.x.values), np.append(1, weight.values))
                 regr = wls(formula='y ~ x',data= df, weights = weight).fit()
                 c_i = regr.get_prediction(exog = exog, transform=True, weights = weight_lod).summary_frame(alpha=conf)

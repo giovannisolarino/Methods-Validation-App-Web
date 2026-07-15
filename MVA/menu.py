@@ -1,13 +1,23 @@
 from nicegui import ui
 
+#label, icon, route, and the frame() navtitle the page passes so the active entry can be marked.
+PAGES = [
+    ('Import data', 'upload_file', '/import_data/', 'Import data'),
+    ('Calibration', 'r_analytics', '/linearity/', 'Linearity'),
+    ('LOD and LOQ', 'r_science', '/lod_n_loq/', 'LOD and LOQ'),
+    ('Precision', 'ads_click', '/precision/', 'Precision'),
+    ('Accuracy', 'verified', '/accuracy/', 'Accuracy'),
+    ('Additional parameters', 'tune', '/add_params/', 'Additional parameters'),
+]
 
-def menu() -> None:
+
+def menu(active: str = '') -> None:
     ui.button.default_style('justify-content: center; border-radius: 10px')
     ui.button.default_classes(replace='text-black')
     with ui.grid():
-        ui.button('Import data', icon='upload_file', on_click=lambda: ui.navigate.to('/import_data/')).props('flat')
-        ui.button('Calibration', icon='r_analytics', on_click=lambda: ui.navigate.to('/linearity/')).props('flat')
-        ui.button('LOD and LOQ', icon='r_science', on_click=lambda: ui.navigate.to('/lod_n_loq/')).props('flat')
-        ui.button('Precision', icon='ads_click', on_click=lambda: ui.navigate.to('/precision/')).props('flat')
-        ui.button('Accuracy', icon='verified',on_click=lambda: ui.navigate.to('/accuracy/')).props('flat')
-        ui.button('Additional parameters', icon='tune', on_click=lambda: ui.navigate.to('/add_params/')).props('flat')
+        for label, icon, path, navtitle in PAGES:
+            btn = ui.button(label, icon=icon, on_click=lambda p=path: ui.navigate.to(p))
+            if navtitle == active:
+                btn.props('color=primary').classes(replace='text-white')
+            else:
+                btn.props('flat')

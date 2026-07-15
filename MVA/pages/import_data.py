@@ -7,9 +7,8 @@ import asyncio
 import theme
 
 
-#-----EXAMPLE-DATASET-----#
 #Amphetamine calibration curve: 5 levels x 9 replicates (3 curves on each of 3 days).
-#Note the trailing space in the analyte column name, it is part of the header.
+#The trailing space in the analyte column name is part of the header.
 EXAMPLE_PATH = './static/Amph_example_dataset.xlsx'
 EXAMPLE_COLS = ['Conc', 'Area amphetamine ', 'Area amphetamineD6 ISTD']
 EXAMPLE_NAME = 'Amphetamine'
@@ -32,11 +31,7 @@ def info_expander():
         btn1.on_click(dialog.clear)
 
 
-#-----PAGE-CONTENT-----#
 def content():
-    #Everything the page needs (the uploaded frame, the selects, the buttons) is a local of
-    #this function, captured by the handlers below. As module globals a second client
-    #uploading a dataset clobbered the first client's frame and widget handles.
     with theme.frame('Import data'):
 
         #Mutable box so the handlers can rebind the widgets they create for each other.
@@ -198,8 +193,8 @@ def content():
             app.storage.user['unit'] = EXAMPLE_UNIT
             app.storage.user['istd_conc'] = EXAMPLE_ISTD_CONC
 
-            #Rebuild the form from scratch, otherwise a second click stacks a duplicate
-            #set of selects and a duplicate 'Show data' button.
+            #Rebuild the form from scratch, otherwise a second click stacks a duplicate set of
+            #selects and a duplicate 'Show data' button.
             if ui_state['btn'] is not None:
                 ui_state['btn'].delete()
                 ui_state['btn'] = None

@@ -13,7 +13,6 @@ from statsmodels.formula.api import ols, wls
 
 
 def grouping(df: pd.DataFrame):
-    #Groupby calibrators
     groups = {}
     n = df['Calibrator'].nunique()
     for i in range(1, n+1):
@@ -24,16 +23,13 @@ def grouping(df: pd.DataFrame):
 
 
 def levene_test(df: pd.DataFrame):
-    #Levene test for heteroscedasticity
         groups = grouping(df)
 
         if not groups:
             raise ValueError('No calibration data left to test: the leave-one-out training set is empty.')
 
-        #A single replicate per level leaves the within-level variance undefined, which
-        #happens intra-day whenever a day holds only two curves and leave-one-out drops
-        #one of them. Falling back to the homoscedastic branch (OLS) explicitly, rather
-        #than leaning on scipy returning NaN.
+        #A single replicate per level leaves the within-level variance undefined, so fall back
+        #to OLS explicitly rather than leaning on scipy returning NaN.
         if min(len(group) for group in groups.values()) < 2:
             return pd.DataFrame({'p-value': [np.nan], 'Outcome': ['Homoscedastic']}), 'Homoscedastic'
 
@@ -56,13 +52,11 @@ def levene_test(df: pd.DataFrame):
 
 
 def f_test_sced(df: pd.DataFrame):
-    #F-test for heteroscedasticity
     groups = grouping(df)
     LLOQ = min(groups.keys())
     ULOQ = max(groups.keys())
-    #Sample variances (ddof=1): the F-test compares estimates of the population variances,
-    #and numpy's default ddof=0 only cancels out of the ratio when the two levels carry the
-    #same number of replicates.
+    #ddof=1: numpy's default ddof=0 only cancels out of the ratio when the two levels carry
+    #the same number of replicates.
     var_lloq = groups[LLOQ].var(ddof=1)
     if var_lloq == 0:
         p = 1
@@ -87,10 +81,8 @@ def f_test_sced(df: pd.DataFrame):
     
 
 def weight_sel(df: pd.DataFrame):
-    #Variance evaluation for weight selection
     if app.storage.user['sced_test'] == 'Heteroscedastic':
-        #One row per concentration level, sorted by x so that it lines up with
-        #the groupby('x') variances below.
+        #Sorted by x so the levels line up with the groupby('x') variances below.
         x_levels = np.sort(df['x'].unique())
         weights = pd.DataFrame({
             'W_no_weight': np.ones(len(x_levels)),
@@ -128,8 +120,8 @@ def weight_sel(df: pd.DataFrame):
 
         variance = pd.DataFrame(variance)
 
-        #Map each level's weight onto its rows by concentration, so that unbalanced
-        #designs (unequal replicate counts) keep every weight on the right row.
+        #Map by concentration, not positionally: unbalanced designs would otherwise put
+        #weights on the wrong rows.
         df['Weight'] = df['x'].map(pd.Series(weight.values, index=x_levels))
     
     elif app.storage.user['sced_test'] == 'Homoscedastic':
@@ -140,12 +132,10 @@ def weight_sel(df: pd.DataFrame):
     return variance, result, weight
         
 def kde(x):
-    #Compute KDE with default parameters
     kde = sm.nonparametric.KDEUnivariate(x).fit()
     return kde
 
 def shapiro_wilk(model):
-    #Perform Shapiro-Wilk test on model residuals
     stat, pval = stats.shapiro(model.wresid)
     if pval < 0.05:
         info = 'Residuals don\'t follow normal distribution'
@@ -175,9 +165,7 @@ def mandel_test(lin_mod, quad_mod):
     #On a tie the quadratic term brings no significant improvement, so keep the simpler model.
     result = 'Quadratic' if F_mandel > F_critic else 'Linear'
 
-    #'Mandel outcome', not 'Best model': this table reports what Mandel's F says, and the residual
-    #double check downstream can still overturn it. Labelling it as the final choice is what made
-    #the page read 'Best model is Quadratic' above a linear plot.
+    #Not the final verdict: double_check() can still overturn it downstream.
     mandel_summary = pd.DataFrame({
         'F-Mandel' : [F_mandel],
         'F-critic' : [F_critic],
@@ -187,14 +175,8 @@ def mandel_test(lin_mod, quad_mod):
     return result, mandel_summary
 
 def double_check(lin_mod, quad_mod):
-    #Paired on the ABSOLUTE residuals, point by point: does the quadratic term actually shrink the
-    #typical error of the fit?
-    #
-    #On the signed residuals the same test is vacuous. Both fits carry an intercept, so both sets of
-    #residuals sum to zero, and the paired differences therefore have mean exactly zero: the test
-    #returns t = 0, p = 1 for every dataset that has ever been or will ever be passed to it. That is
-    #an algebraic identity, not evidence of agreement, and it left the whole decision resting on the
-    #F-test below.
+    #Paired on the ABSOLUTE residuals. On the signed ones the test is vacuous: both fits carry an
+    #intercept, so both residual sets sum to zero and the paired test returns t = 0, p = 1 always.
     t_test = stats.ttest_rel(np.abs(lin_mod.wresid), np.abs(quad_mod.wresid))
     ftest = f_test(lin_mod.wresid, quad_mod.wresid)
 
@@ -211,17 +193,9 @@ def double_check(lin_mod, quad_mod):
     return result, data_stat
 
 def select_model(results: dict, kind: Literal['wls', 'ols']):
-    #Pick linear vs quadratic exactly the way the Linearity page does, so that the model
-    #the user is shown is the model the backcalculation actually uses.
-    #Mandel's test runs on the models fitted to the raw points, n = k*l, as in Eq. (3) of
-    #Alladio et al.; running it on the level means instead leaves 2 residual degrees of
-    #freedom and a different F-critic. When it calls quadratic, the residual double check
-    #falls back to the simpler model if the two fits are statistically indistinguishable.
-    #
-    #Returns the verdict, Mandel's own summary table, and the double check's numbers when the
-    #override actually fired (None otherwise). The caller needs that third value: without it the
-    #page cannot tell a plain 'Linear' from a 'Quadratic' that was demoted, and it ends up showing
-    #a Mandel table that reads Quadratic above a linear plot, with nothing to explain the gap.
+    #Mandel's test runs on the models fitted to the raw points, n = k*l, as in Eq. (3) of Alladio
+    #et al.; on the level means instead it leaves 2 residual dof and a different F-critic.
+    #Returns (verdict, Mandel's summary, the double check's numbers when the override fired).
     mandel, summary = mandel_test(results[f'{kind}_lin_raw'], results[f'{kind}_quad_raw'])
     data_stat = None
     if mandel == 'Quadratic':
@@ -232,22 +206,18 @@ def select_model(results: dict, kind: Literal['wls', 'ols']):
 
 
 def curve_grids(means: pd.DataFrame, n: int = 200):
-    #The x grids the fitted lines are evaluated on. A quadratic drawn through 10 points reads as
-    #a polyline, so the grid is dense. show_model() plots against these same grids, hence the one
-    #definition: when the two disagreed the curve was silently drawn against the wrong abscissa.
-    #means_x spans the calibration range, extended_x extrapolates past the ULOQ as before.
+    #The x grids the fitted lines are evaluated on: means_x spans the calibration range,
+    #extended_x extrapolates past the ULOQ. show_model() plots against these same grids, so
+    #both sides stay on one definition.
     up = (max(means.x))+(max(means.x)-min(means.x))
     return np.linspace(min(means.x), max(means.x), n), np.linspace(-0.5, up, n)
 
 
 def model_wls(df:pd.DataFrame, means: pd.DataFrame, weight: pd.Series):
-    #WLS model
     means_x, extended_x = curve_grids(means)
 
-    #Hand patsy only the two columns the formulas name. The frame still carries the user's
-    #original concentration/analyte/ISTD headers, and a column called I, C or Q shadows the
-    #patsy builtin of the same name, which makes I(x**2) below blow up with
-    #"'Series' object is not callable".
+    #Hand patsy only the columns the formulas name: a user column called I, C or Q shadows the
+    #patsy builtin of the same name and breaks I(x**2) below.
     fit_data = df[['x', 'y']]
 
     wls_lin_means = wls(formula = 'y ~ x',data=means, weights=weight).fit()
@@ -255,8 +225,8 @@ def model_wls(df:pd.DataFrame, means: pd.DataFrame, weight: pd.Series):
     line_wls_lin_means = wls_lin_means.params['Intercept'] + wls_lin_means.params['x']*means_x
     line_wls_lin_raw = wls_lin_raw.params['Intercept'] + wls_lin_raw.params['x']*extended_x
     equation_lin = f"y = {wls_lin_means.params['Intercept']:.4f} + {wls_lin_means.params['x']:.4f}x"
-    #R\u00b2 comes from the fit on the raw n = k*l standards, not on the k level means. Averaging the
-    #replicates away removes the within-level scatter from the residuals, which inflates R\u00b2.
+    #R\u00b2 comes from the raw fit: averaging the replicates away hides the within-level scatter
+    #and inflates it.
     r_squared_lin = f"R\u00b2: {wls_lin_raw.rsquared:.4f}"
     
 
@@ -286,11 +256,9 @@ def model_wls(df:pd.DataFrame, means: pd.DataFrame, weight: pd.Series):
 
 
 def model_ols(df:pd.DataFrame, means: pd.DataFrame):
-    #OLS model
     means_x, extended_x = curve_grids(means)
 
-    #See model_wls: patsy resolves names against the data frame first, so a user column
-    #named I, C or Q would shadow the patsy builtin and break I(x**2).
+    #See model_wls.
     fit_data = df[['x', 'y']]
 
     ols_lin_means = ols(formula = 'y ~ x',data=means).fit()
@@ -298,7 +266,7 @@ def model_ols(df:pd.DataFrame, means: pd.DataFrame):
     line_ols_lin_means = ols_lin_means.params['Intercept'] + ols_lin_means.params['x']*means_x
     line_ols_lin_raw = ols_lin_raw.params['Intercept'] + ols_lin_raw.params['x']*extended_x
     equation_lin = f"y = {ols_lin_means.params['Intercept']:.4f} + {ols_lin_means.params['x']:.4f}x"
-    #See model_wls: R\u00b2 belongs to the raw fit, the means fit hides the within-level scatter.
+    #See model_wls.
     r_squared_lin = f"R\u00b2: {ols_lin_raw.rsquared:.4f}"
     
 
@@ -329,20 +297,18 @@ def model_ols(df:pd.DataFrame, means: pd.DataFrame):
 
 def hub_vox(ncal:int, conf:float, df:pd.DataFrame, means:pd.DataFrame, result_weight:str):
     # Hubaux and Vos algorithm, following Alladio et al., MethodsX 7 (2020) 100919, Eqs (7)-(11).
-    # Notation: k = ncal calibration levels, l = replicates per level, n = k*l standards.
-    # Everything is computed on the NORMALIZED scale (x = conc / C_ISTD, y = signal ratio)
-    # and rescaled to concentration exactly once, at the end, via input_istd.
-    # conf is the one-sided significance level alpha (0.05).
+    # k = ncal levels, l = replicates per level, n = k*l standards. Everything is computed on the
+    # NORMALIZED scale (x = conc / C_ISTD) and rescaled to concentration once, at the end.
     input_istd = app.storage.user['istd_conc']
     if not (0 < conf < 0.5):
         raise ValueError(f'conf is the one-sided significance level alpha (e.g. 0.05), got {conf!r}')
 
     sub   = df[df['Calibrator'] <= ncal]
-    x_cal = sub.x                      # normalized concentration, all standards
-    x_i   = means.x[:ncal]             # per-level normalized means (NO *input_istd)
+    x_cal = sub.x
+    x_i   = means.x[:ncal]
 
-    # Eq (8) assumes a balanced design. Fall back to the most common replicate count
-    # when the levels disagree, and say so.
+    # Eq (8) assumes a balanced design: fall back to the most common replicate count when the
+    # levels disagree, and say so.
     counts = sub['Calibrator'].value_counts()
     l = int(counts.mode().iat[0])
     if counts.nunique() > 1:
@@ -350,9 +316,8 @@ def hub_vox(ncal:int, conf:float, df:pd.DataFrame, means:pd.DataFrame, result_we
                   f'Hubaux and Vos assumes a balanced design: using l = {l}.',
                   type='warning', position='center', timeout=0, close_button='OK')
 
-    # '' is the homoscedastic case, 'No weight' the heteroscedastic case where the
-    # unweighted fit won on variance. Both mean w = 1 for every observation, which
-    # makes the weighted fit below degenerate into an ordinary least squares one.
+    # '' is the homoscedastic case, 'No weight' the heteroscedastic one where the unweighted fit
+    # won on variance. Both mean w = 1 everywhere, so the fit below degenerates into OLS.
     if result_weight in ('No weight', ''):
         n_weights = np.ones(len(x_cal))
         a = np.ones(ncal)
@@ -365,27 +330,25 @@ def hub_vox(ncal:int, conf:float, df:pd.DataFrame, means:pd.DataFrame, result_we
     else:
         raise ValueError(f'Unknown weight type: {result_weight!r}')
 
-    # Make the weights relative (dimensionless) so the standalone 1 in Eq (8) is
-    # commensurate with the other two terms; otherwise the weighted radical depends
-    # on the concentration unit. For the unweighted case this is a no-op.
+    # Make the weights dimensionless, so the standalone 1 in Eq (8) is commensurate with the
+    # other two terms and the radical does not depend on the concentration unit.
     n_weights = n_weights/np.mean(n_weights)
     a = a/np.mean(a)
 
-    # Eq (10): weighted mean of the calibration concentrations (named column, normalized scale)
+    # Eq (10)
     x_w = np.sum(n_weights*x_cal)/np.sum(n_weights)
 
-    # Eqs (9) and (11): the residuals and the slope both belong to the weighted curve
+    # Eqs (9) and (11): residuals and slope both belong to the weighted curve
     regr = wls(formula='y ~ x', data=sub[['x', 'y']], weights=n_weights).fit()
     S_y_x = np.sqrt(np.sum((regr.resid**2)*n_weights)/regr.df_resid)
 
-    # Eq (8): both sums run over the k levels and carry the l replicates (all normalized)
+    # Eq (8): both sums run over the k levels and carry the l replicates
     s_term = 1/np.sum(l*a)
     t_term = ((-x_w)**2)/np.sum(l*a*(x_i - x_w)**2)
     rad = np.sqrt(1+s_term+t_term)
     s_y0 = S_y_x*rad
 
-    # Eq (7), turned into a concentration through the slope of Eq (11), then rescaled
-    # from normalized units back to concentration by the ISTD concentration.
+    # Eq (7), turned into a concentration through the slope of Eq (11)
     t = stats.t.ppf(1-conf, regr.df_resid)
     x_lod = (t * s_y0)/regr.params['x'] * input_istd
     x_loq = x_lod * 2
@@ -395,9 +358,8 @@ def hub_vox(ncal:int, conf:float, df:pd.DataFrame, means:pd.DataFrame, result_we
 
 def precision_routine(df: pd.DataFrame, n_days: int, type:Literal['intra', 'inter'], num: Optional[int]=None):
     #Backcalculate the calibration points by leave-one-out and express the spread as CV%.
-    #The unit left out differs between the two: 'intra' drops one curve of day `num` and
-    #refits on the other curves of that same day, 'inter' drops a whole day and refits on
-    #the curves of the remaining days.
+    #'intra' drops one curve of day `num` and refits on the other curves of that day,
+    #'inter' drops a whole day and refits on the remaining days.
     group_days(df, n_days)
     combos = comb_intra(df, n_days)
     if type == 'intra':
@@ -484,8 +446,7 @@ def precision_routine(df: pd.DataFrame, n_days: int, type:Literal['intra', 'inte
 def accuracy_routine(df: pd.DataFrame, n_days: int, type:Literal['intra', 'inter'], num: Optional[int]=None):
     #Backcalculate the calibration points by leave-one-out and express the deviation from the
     #spiked concentration as bias%, following Eq. (12) of Alladio et al., MethodsX 7 (2020) 100919.
-    #The unit left out differs between the two: 'intra' drops one curve of day `num` and refits on
-    #the other curves of that same day, 'inter' drops a whole day and refits on the remaining days.
+    #'intra' and 'inter' leave out a curve and a whole day respectively, as in precision_routine.
     group_days(df, n_days)
     combos = comb_intra(df, n_days)
     if type == 'intra':

@@ -6,9 +6,8 @@ from io import BytesIO
 from utilities.pd_utilities import template_xlsx, tables_xlsx, matrix_effect, recovery_calc
 
 
-#Matrix effect and recovery are the same workflow twice over, once per parameter, so both
-#tabs are driven by the one panel() below. The two differ only in the template columns, the
-#function that computes the percentages and the labels.
+#Matrix effect and recovery are the same workflow twice over, so both tabs are driven by the one
+#panel() below and differ only in these specs.
 MATRIX = {
     'name': 'matrix effect',
     'columns': ('Matrix', 'No-Matrix'),
@@ -29,9 +28,6 @@ RECOVERY = {
 
 
 def panel(spec: dict):
-    #Everything here is scoped to one client: the uploaded frames and the widget handles are
-    #locals captured by the closures, never module globals, so two users on the server cannot
-    #overwrite each other's tables.
     ui.markdown(f'##### {spec["name"].capitalize()}')
 
     def handle_upload(e: events.UploadEventArguments):
@@ -46,8 +42,8 @@ def panel(spec: dict):
                       type='negative', position='center')
             return
 
-        #Hand the workbook to the browser as bytes. Writing it to .nicegui/ first meant every
-        #user shared one file, and a download could serve somebody else's results.
+        #Bytes, not a file under .nicegui/: every user would share that one path and a download
+        #could serve somebody else's results.
         workbook = tables_xlsx(dict(zip(spec['sheets'], (table, complete))))
         with results:
             results.clear()

@@ -7,7 +7,6 @@ import theme
 
 
 def help_func():
-    #Show info about accuracy routine
     ui.html('<style>.multi-line-notification { white-space: pre-line; font-weight: bold;}</style>')
     ui.notify('Accuracy is evaluated on all calibration points using backcalculation. \n'
                 'Backcalculation is performed with a leave-one-out method, iterated over every fold. \n'
@@ -21,18 +20,14 @@ def help_func():
 
 
 def accuracy():
-    #Same scoping as the Precision page: per-user state stays local to the page function so
-    #that concurrent clients on a server cannot overwrite each other's dataframe and tables.
     try:
         df = pd.read_json(app.storage.user['df'])
         means = means_data(df)
         app.storage.user['n_curves'] = count_curves(df)
     except:
         df = None
-        ui.notify('Data not found', type='negative', position='center')
 
     def intra_day():
-        #Display intraday table
         intra_day_table.clear()
         CVs = []
         days = app.storage.user.get('days')
@@ -65,7 +60,6 @@ def accuracy():
             ''')
 
     def inter_day():
-        #Display interday table
         inter_day_table.clear()
         days = app.storage.user.get('days')
         if days is None:
@@ -109,7 +103,7 @@ def accuracy():
                 ui.number('Number of curves for each day', precision=0, on_change=handle_warning) \
                     .bind_value(app.storage.user, 'curves_per_day').style('width: 300px')
                 ui.element('div').style('width: 50px; visibility: hidden;')
-                sel_days = ui.number(label='Days of validation',value=None, precision=0).bind_value_to(app.storage.user, 'days').style('width: 200px').on_value_change(intra_inter)
+                sel_days = ui.number(label='Days of validation', precision=0).bind_value(app.storage.user, 'days').style('width: 200px').on_value_change(intra_inter)
                 sel_days.on_value_change(handle_days)
                 sel_days.tooltip('Make sure that the same number of curves was obtained on each day')
                 ui.element('div').style('width: 50px; visibility: hidden;')
@@ -127,3 +121,8 @@ def accuracy():
             ui.separator().props("color=black size=1px")
             inter_day_table = ui.element('div').style('width: 1000px; height: 600px')
             ui.separator().props("color=black size=1px")
+            #Render straight away when the design is already in storage: bind_value prefills the
+            #fields but does not fire on_value_change, so nothing would compute otherwise.
+            intra_inter()
+        else:
+            theme.data_required_prompt()

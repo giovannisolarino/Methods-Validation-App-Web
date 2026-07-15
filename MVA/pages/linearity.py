@@ -1,5 +1,4 @@
 import theme
-import asyncio
 import pandas as pd
 from utilities.pd_utilities import means_data, display_df
 from utilities.plotly_utilities import make_biplot, uloq_lloq_graph, show_model, residual_graph, kde_resid, q_qplot, hd_plot
@@ -13,30 +12,23 @@ def update_name_button(button: ui.dropdown_button, new_text: str):
 
 
 def linearity():
-    #Per-user state (dataframe, fitted models, plot containers) is local to the page function.
-    #As module globals a second client opening this page rebound the first client's models and
-    #wrote its plots into the first client's containers.
     try:
         df = pd.read_json(app.storage.user['df'])
     except:
         df = None
-        ui.notify('Data not found', type='negative', position='center')
 
     async def waiting():
         with ui.row() as spin_row:
             ui.spinner(size='lg')
             ui.label("Processing graph...").classes('text-bold')
-        await asyncio.sleep(2)
         hd_plot(cal_plot)
         spin_row.delete()
 
-    #WLS and OLS drove two near-identical copies of every handler below. The only difference is
-    #the key prefix in the results dict, so `kind` carries it and one copy serves both.
+    #`kind` is the 'wls'/'ols' key prefix into the results dict, so one copy of each handler
+    #below serves both models.
     def best_model():
-        #Perform Mandel's test (with the residual double check) and show the best model.
-        #data_stat is non-empty only when the double check actually overturned Mandel, and the
-        #card below is the only thing telling the user why the plot disagrees with the table.
-        #It used to be guarded on the post-override verdict, so it could never render.
+        #data_stat is non-empty only when the double check overturned Mandel, and the card below
+        #is the only thing telling the user why the plot disagrees with the table.
         update_name_button(dpbutton, 'Best calibration model')
         mandel, mandel_summary, data_stat = select_model(results, kind)
 
@@ -72,7 +64,7 @@ def linearity():
                 ui.table.from_pandas(mandel_summary.round(2), title='Mandel test').classes(replace='text-align: center').props('flat').style('width:350px')
                 ui.element('div').style('width: 300px; visibility: hidden;')
                 if data_stat is not None:
-                    with ui.card(align_items='center').tooltip('Additional t-test anf F-test to compare models\' residuals (α = 0.01)'):
+                    with ui.card(align_items='center').tooltip('Additional t-test and F-test to compare models\' residuals (α = 0.01)'):
                         ui.markdown('#### Double check on residuals')
                         ui.icon('info')
                         ui.markdown('''Since models\' residuals are statistically identical,
@@ -84,7 +76,6 @@ def linearity():
             hd_plot(model)
 
     def show_plot(trend: str):
-        #trend is 'lin' or 'quad'
         label, name = ('Linear', 'lin') if trend == 'lin' else ('Quadratic', 'quad')
         update_name_button(dpbutton, f'{label} model')
 
@@ -139,9 +130,8 @@ def linearity():
                     cal_plot = make_biplot(df, means)
                     ui.timer(0, callback=waiting, once=True)
 
-            #HETEROSCEDASTICITY TESTING
             ui.separator().props("color=black size=1px").style('width: 85vw')
-            ui.markdown('## _Heteroscedasticy testing_')
+            ui.markdown('## _Heteroscedasticity testing_')
             with ui.card():
                 with ui.tabs() as tabs:
                     ui.tab('L', label='Levene Test')
@@ -175,7 +165,6 @@ def linearity():
                                 ui.icon('info')
                                 ui.markdown('Weighting is not needed since data show homoscedasticity')
 
-            #CALIBRATION MODEL
             ui.separator().props("color=black size=1px").style('width: 85vw')
             ui.markdown('## _Calibration model_')
             with ui.card():
@@ -194,3 +183,5 @@ def linearity():
                     ui.item('Quadratic model', on_click=lambda: show_plot('quad')).props(add='clickable = True')
                 with ui.element('div') as plot:
                     best_model()
+        else:
+            theme.data_required_prompt()

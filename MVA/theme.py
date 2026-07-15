@@ -10,13 +10,18 @@ def clear_user_session():
     ui.notify('Session cleared.', type='info', position='top')
     ui.navigate.reload()
 
-#--------PAGE-FRAME------#
-"""Shares the same styling behavior across all pages.
-    When creating a new page call the function theme.frame() to display the layout.
-    Navtitle parameters is the page's name"""
+
+def data_required_prompt():
+    '''Persistent empty state for pages gated on an imported dataset.'''
+    with ui.card(align_items='center').classes('no-shadow border-[1px]').style('background-color: #E97451; margin-top: 20px'):
+        ui.icon('info')
+        ui.markdown('**No dataset in memory.** Import your data to use this page.')
+        ui.button('Go to Import data', icon='upload_file',
+                  on_click=lambda: ui.navigate.to('/import_data/'))
 
 @contextmanager
 def frame(navtitle: str):
+    '''Shared layout for every page: call it as a context manager around the page's content.'''
     ui.colors(primary='#9ec239', secondary='#d9d9d9', accent='#111B1E', positive='#21ba45', negative="#c10015")
     
     ui.add_head_html('''
@@ -38,7 +43,6 @@ def frame(navtitle: str):
     with ui.column().classes('min-h-screen w-full overflow-x-hidden'):
         yield
 
-    # header
     with ui.header().classes(replace='row items-center') as header:
         ui.button(on_click=lambda: left_drawer.toggle(), icon='menu').props('flat color=white')
         ui.image('/icons/logo_no_bg.png').classes('w-16')
@@ -68,7 +72,7 @@ def frame(navtitle: str):
                     ui.button('About', on_click=lambda: ui.navigate.to('/')).props('no-caps flat').classes(replace='text-black')
                     ui.button('Credits', on_click=lambda: ui.navigate.to('/credits/')).props('no-caps flat').classes(replace='text-black')
                 ui.separator()
-                menu()
+                menu(navtitle)
             
             with ui.column().classes('w-full p-2'):
                 ui.separator()

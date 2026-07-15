@@ -1,16 +1,13 @@
-import theme
+﻿import theme
 from nicegui import ui
 
 
 def credits() -> None:
     with theme.frame('Credits'):
 
-        # --- Title -----------------------------------------------------------
         ui.markdown('## **Credits**')
         ui.separator().props('color=black size=2px').style('width: 90vw; margin:auto;')
 
-        # --- Intro text ------------------------------------------------------
-        # If you want pure HTML, ui.html is safer than ui.markdown here
         ui.html('''
             <div style="text-align:center; font-size:1.1rem; margin-top:20px;">
                 <b>MVA</b> has been developed through a collaborative effort between
@@ -21,17 +18,14 @@ def credits() -> None:
 
         ui.separator().props('color=black size=1px').style('width: 60vw; margin:20px auto;')
 
-        # --- Contributors title ---------------------------------------------
         ui.html('''
             <div style="text-align:center; font-size:1.4rem; margin-top:20px; font-weight:bold;">
                 Contributors
             </div>
         ''')
 
-        # --- Cards row -------------------------------------------------------
         with ui.row().classes('w-full gap-6 q-pa-md'):
 
-            # Giovanni
             with ui.card().classes('shadow-md').style(
                     'border: 1px solid #9ec239; width:330px; border-radius:10px; padding:15px;'):
                 ui.markdown('**Giovanni Solarino**').classes('text-lg')
@@ -43,7 +37,6 @@ def credits() -> None:
                     new_tab=True,
                 )
 
-            # Alladio
             with ui.card().classes('shadow-md').style(
                     'border: 1px solid #9ec239; width:330px; border-radius:10px; padding:15px;'):
                 ui.markdown('**Eugenio Alladio**').classes('text-lg')
@@ -55,7 +48,6 @@ def credits() -> None:
                     new_tab=True,
                 )
 
-            # Vincenti
             with ui.card().classes('shadow-md').style(
                     'border: 1px solid #9ec239; width:330px; border-radius:10px; padding:15px;'):
                 ui.markdown('**Marco Vincenti**').classes('text-lg')
@@ -67,7 +59,6 @@ def credits() -> None:
                     new_tab=True,
                 )
 
-            # DataBloom
             with ui.card().classes('shadow-md').style(
                     'border: 1px solid #9ec239; width:330px; border-radius:10px; padding:15px;'):
                 ui.markdown('**DataBloom s.r.l.**').classes('text-lg')
@@ -78,7 +69,6 @@ def credits() -> None:
                     new_tab=True,
                 )
 
-        # --- Licensing section ----------------------------------------------
         ui.html('''
             <div style="
                 text-align:left;
@@ -102,7 +92,6 @@ def credits() -> None:
             </div>
         ''')
 
-        # --- Bug Report Panel -----------------------------------------------
         ui.separator().props('color=black size=1px').style(
             'width: 60vw; max-width:800px; margin: 20px auto;')
 
@@ -145,7 +134,6 @@ def credits() -> None:
                 ),
             ).props('rounded no-caps').classes('w-full')
 
-        # --- Footer / Copyright ---------------------------------------------
 
         with ui.row().classes('w-full justify-center'):
             ui.html('''
@@ -153,7 +141,7 @@ def credits() -> None:
             text-align:center;
             font-size:0.9rem;
             color:#555;">
-            © 2025 MVA — DataBloom & University of Turin<br>
+            Â© 2025 MVA â€” DataBloom & University of Turin<br>
             <span style="font-size:0.80rem; color:#666;">
                 Distributed as freeware for academic and research purposes.<br>
                 For access to the complete version, please contact <b>DataBloom</b>.

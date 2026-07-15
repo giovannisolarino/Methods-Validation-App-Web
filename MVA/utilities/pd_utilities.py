@@ -41,10 +41,8 @@ def normalize(df: pd.DataFrame, selected_col: list, istd_conc):
     df['Alpha'] = df.groupby(conc_col).cumcount().astype(int) + 1
     df['Alpha'] = df['Alpha'].apply(letters).astype(str)
 
-    #Number the levels by ascending concentration rather than by order of appearance in the
-    #file. Everything downstream assumes calibrator 1 is the LLOQ and calibrator k the ULOQ
-    #(the F-test on the extremes, Hubaux and Vos), and means_data() reads the levels back
-    #sorted by x, so the numbering has to agree with the concentration order.
+    #Number the levels by ascending concentration, not by order of appearance in the file:
+    #everything downstream assumes calibrator 1 is the LLOQ and calibrator k the ULOQ.
     levels = {conc: i for i, conc in enumerate(np.sort(df[conc_col].unique()), start=1)}
     df['Level'] = df[conc_col].map(levels)
     df['Num'] = df['Level'].astype(str)
@@ -53,10 +51,8 @@ def normalize(df: pd.DataFrame, selected_col: list, istd_conc):
     df = df.filter(['Points', 'Level', 'Alpha', conc_col, f'{selected_col[1]}', f'{selected_col[2]}'])
     df.dropna(inplace=True)
 
-    #Sort on (level, curve) as numbers, not on the 'Points' label. 'Points' is a string, so
-    #sorting it directly orders '10A' before '2A' and scrambles the levels as soon as there
-    #are ten or more of them, while the routines downstream pair rows with concentrations
-    #positionally.
+    #Sort on (level, curve) as numbers, not on the 'Points' string: that orders '10A' before
+    #'2A' and scrambles the levels from ten of them on.
     df.sort_values(by=['Level', 'Alpha'], inplace=True)
     df.drop(columns=['Level', 'Alpha'], inplace=True)
 
@@ -67,8 +63,7 @@ def normalize(df: pd.DataFrame, selected_col: list, istd_conc):
     df['x'] = df[f'{selected_col[0]}']/istd_conc
     df['y'] = (df[f'{selected_col[1]}'].astype(float))/(df[f'{selected_col[2]}'].astype(float))
 
-    #Signals and the response ratio keep full precision here. Rounding them to a
-    #readable number of digits is display_df()'s job, not the data model's.
+    #Full precision: rounding for readability is display_df()'s job.
     return df
 
 
@@ -126,9 +121,8 @@ def group_days(df: pd.DataFrame, days: int):
     df['Alpha'] = df['Alpha'].apply(letters).astype(str)
     uniques_cal = sorted(df['Alpha'].unique())
 
-    #Splitting the curves into exactly `days` groups. Deriving a group size with
-    #ceil() instead produces fewer groups than asked whenever days does not divide
-    #the number of curves (9 curves over 4 days gives 3 groups, not 4).
+    #array_split gives exactly `days` groups. Deriving a group size with ceil() instead yields
+    #fewer groups than asked whenever days does not divide the curves (9 over 4 days gives 3).
     if days > len(uniques_cal):
         ui.notify(f'{days} days requested but only {len(uniques_cal)} calibration curves are available: '
                   f'using {len(uniques_cal)} days.', type='warning', position='center', timeout=0, close_button='OK')
@@ -221,9 +215,8 @@ def template_xlsx(levels: int, replicates: int, columns: tuple):
     '''
     Build an empty excel template as bytes, ready to hand straight to ui.download.
 
-    Returning bytes rather than writing to a fixed path under .nicegui/: on a shared server
-    two users generating a template at the same time would otherwise overwrite each other's
-    file and download the wrong one.
+    Bytes rather than a fixed path under .nicegui/: on a shared server two users generating a
+    template at once would overwrite each other's file.
 
     Params:
         levels: number of different concentration's levels (2 or 3)

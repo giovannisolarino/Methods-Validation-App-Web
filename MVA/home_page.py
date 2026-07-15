@@ -24,7 +24,7 @@ def about() -> None:
                 **_More information can be found in the documentation and/or in bibliography._**     
                 
                 ''').classes('padding: 40px')
-        ui.image('.\icons\logo_no_bg.png').props('fit=scale-down')
+        ui.image('/icons/logo_no_bg.png').props('fit=scale-down')
 
         ui.add_css('''
             .q-timeline__title {
