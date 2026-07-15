@@ -317,7 +317,7 @@ def hub_vox(ncal:int, conf:float, df:pd.DataFrame, means:pd.DataFrame, result_we
                   type='warning', position='center', timeout=0, close_button='OK')
 
     # '' is the homoscedastic case, 'No weight' the heteroscedastic one where the unweighted fit
-    # won on variance. Both mean w = 1 everywhere, so the fit below degenerates into OLS.
+    # won on variance. Both set w = 1 everywhere in the error propagation below.
     if result_weight in ('No weight', ''):
         n_weights = np.ones(len(x_cal))
         a = np.ones(ncal)
@@ -338,8 +338,11 @@ def hub_vox(ncal:int, conf:float, df:pd.DataFrame, means:pd.DataFrame, result_we
     # Eq (10)
     x_w = np.sum(n_weights*x_cal)/np.sum(n_weights)
 
-    # Eqs (9) and (11): residuals and slope both belong to the weighted curve
-    regr = wls(formula='y ~ x', data=sub[['x', 'y']], weights=n_weights).fit()
+    # Eqs (9) and (11): slope and residuals come from the UNWEIGHTED (OLS) fit, to keep the LOD
+    # conservative. A variance-optimal weighting would tilt the line and shrink the residuals near
+    # x = 0, where the LOD is read, reporting a smaller limit. The weights still enter the error
+    # propagation below (S_y_x and Eq (8)); only intercept and slope are taken from OLS.
+    regr = ols(formula='y ~ x', data=sub[['x', 'y']]).fit()
     S_y_x = np.sqrt(np.sum((regr.resid**2)*n_weights)/regr.df_resid)
 
     # Eq (8): both sums run over the k levels and carry the l replicates

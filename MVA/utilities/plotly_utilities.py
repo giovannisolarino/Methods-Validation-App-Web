@@ -6,6 +6,7 @@ if getattr(sys, 'frozen', False):
     matplotlib.use('svg')
 import pandas as pd
 import numpy as np
+from scipy import stats
 import io
 from PIL import Image
 from typing import Literal, Optional
@@ -57,7 +58,7 @@ def hd_plot(fig, filename: Optional[str] = None, format: str = 'png'):
     config['toImageButtonOptions']['filename'] = filename or (title.replace(' ', '_') if title else 'MVA_plot')
     return ui.plotly({**fig.to_plotly_json(), 'config': config})
 from statsmodels.graphics.gofplots import qqplot
-from statsmodels.formula.api import ols, wls
+from statsmodels.formula.api import ols
 
 def make_biplot(df: pd.DataFrame, means: pd.DataFrame):
     '''
@@ -223,36 +224,43 @@ def q_qplot(model, df:pd.DataFrame):
 
 
 
-def conf_lm(conf, df:pd.DataFrame,ncal ,weight:Optional[any]=None):
+def conf_lm(conf, df:pd.DataFrame, ncal, weight:Optional[any]=None):
         df = df.iloc[:ncal]
+        x = df.x.values
+
+        #Line from OLS (slope/intercept only), to match the deliberately unweighted Hubaux and Vos
+        #LOD. The selected weights still enter the band's error propagation, exactly as in hub_vox:
+        #OLS residuals, weighted S_y|x and weighted leverage.
+        regr = ols(formula='y ~ x', data=df).fit()
+
+        #Level weights normalized to mean 1 (homoscedastic case: w = 1). The band is scale-
+        #invariant to this, but it keeps the standalone 1 (a future observation at x = 0)
+        #commensurate with the per-level weights, as Eq (8) requires.
+        w = (weight.iloc[:ncal].values if weight is not None else np.ones(ncal)).astype(float)
+        w = w/w.mean()
+        x_w = np.sum(w*x)/np.sum(w)
+        Sxx_w = np.sum(w*(x - x_w)**2)
+        S_y_x = np.sqrt(np.sum(w*regr.resid.values**2)/regr.df_resid)
 
         #The prediction band is a hyperbola in x, so it needs a dense abscissa: drawn only through
-        #the calibration levels it becomes straight segments, flattening the waist of the band at
-        #x = 0, where the LOD is read off.
-        grid = np.linspace(0, max(df.x), 200)
-        exog = pd.DataFrame({'x': grid})
+        #the calibration levels it becomes straight segments, flattening the waist at x = 0, where
+        #the LOD is read off.
+        grid = np.linspace(0, x.max(), 200)
+        #Future-observation weight: 1 at x = 0 (unit variance, as in Eq (8)) up to the level weights.
+        w0 = np.interp(grid, np.append(0, x), np.append(1, w))
+        #Prediction interval of a future observation, not the confidence band of the fitted mean.
+        se = S_y_x*np.sqrt(1/w0 + 1/np.sum(w) + (grid - x_w)**2/Sxx_w)
+        t = stats.t.ppf(1 - conf/2, regr.df_resid)
+        line  = regr.params['Intercept'] + regr.params['x']*grid
+        upper = line + t*se
+        lower = line - t*se
 
-        if weight is not None:
-                weight = weight.iloc[:ncal]
-                #The band is predicted at every grid point, so it needs a weight there too:
-                #interpolated between 1 at x = 0 and the per-level weights.
-                weight_lod = np.interp(grid, np.append(0, df.x.values), np.append(1, weight.values))
-                regr = wls(formula='y ~ x',data= df, weights = weight).fit()
-                c_i = regr.get_prediction(exog = exog, transform=True, weights = weight_lod).summary_frame(alpha=conf)
-
-        else:
-                regr = ols(formula='y~x', data=df).fit()
-                c_i = regr.get_prediction(exog=exog, transform=True).summary_frame(alpha=conf)
-
-        line = regr.params['Intercept'] + regr.params['x']*exog.x
         fig= go.Figure()
         fig.add_trace(go.Scatter(x=df.x, y = df.y, mode='markers', marker=dict(size=8),
-                    hovertemplate='CAL %{text}<extra></extra>', text=df.index, name='Data means'))  
-        fig.add_trace(go.Scatter(x=exog.x,y=line, mode='lines', line=dict(dash='solid', color='green'), name='Regression line'))
-        #Hubaux and Vos is defined on the prediction interval of a future observation,
-        #not on the confidence interval of the fitted mean.
-        fig.add_trace(go.Scatter(x=exog.x, y=c_i['obs_ci_upper'], mode='lines', line=dict(dash='dash', color='red'), name='Upper prediction interval'))
-        fig.add_trace(go.Scatter(x=exog.x, y=c_i['obs_ci_lower'], mode='lines',line=dict(dash='dash', color='blue'), fill='tonexty',
+                    hovertemplate='CAL %{text}<extra></extra>', text=df.index, name='Data means'))
+        fig.add_trace(go.Scatter(x=grid, y=line, mode='lines', line=dict(dash='solid', color='green'), name='Regression line'))
+        fig.add_trace(go.Scatter(x=grid, y=upper, mode='lines', line=dict(dash='dash', color='red'), name='Upper prediction interval'))
+        fig.add_trace(go.Scatter(x=grid, y=lower, mode='lines',line=dict(dash='dash', color='blue'), fill='tonexty',
                      fillcolor='rgba(244, 236, 194,0.4)', name='Lower prediction interval'))
         fig.update_layout(
                 title_text='Prediction interval',
