@@ -62,7 +62,7 @@ def credits() -> None:
             with ui.card().classes('shadow-md').style(
                     'border: 1px solid #9ec239; width:330px; border-radius:10px; padding:15px;'):
                 ui.markdown('**DataBloom s.r.l.**').classes('text-lg')
-                ui.markdown('Data Science and Chemometrics solutions')
+                ui.markdown('Data Science and Chemometrics')
                 ui.link(
                     'info@databloom.it',
                     'mailto:info@databloom.it',
@@ -141,10 +141,9 @@ def credits() -> None:
             text-align:center;
             font-size:0.9rem;
             color:#555;">
-            Â© 2025 MVA â€” DataBloom & University of Turin<br>
+            © 2025 MVA - DataBloom & University of Turin<br>
             <span style="font-size:0.80rem; color:#666;">
                 Distributed as freeware for academic and research purposes.<br>
-                For access to the complete version, please contact <b>DataBloom</b>.
             </span>
         </div>
     ''')
