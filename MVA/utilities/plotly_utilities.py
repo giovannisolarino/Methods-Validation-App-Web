@@ -224,36 +224,25 @@ def q_qplot(model, df:pd.DataFrame):
 
 
 
-def conf_lm(conf, df:pd.DataFrame, ncal, weight:Optional[any]=None):
+def conf_lm(df:pd.DataFrame, ncal, band, zoom=False):
+        #Draw the Hubaux and Vos prediction band from the geometry hub_vox already computed, so the
+        #band the LOD is read from and the CCα/CCβ markers on it are one and the same (Fig. 2 of del
+        #Río Bocio et al., J. Chemometrics 17 (2003) 413). Everything is on the normalized (ratio) scale.
         df = df.iloc[:ncal]
         x = df.x.values
+        b0, b1 = band['intercept'], band['slope']
+        cc_a, cc_b = band['cc_alpha'], band['cc_beta']
+        #y_C is the upper band at x=0; by construction it also equals the line at CCα and the lower
+        #band at CCβ, which is exactly what makes the horizontal line intersect all three.
+        y_C = b0 + b1*cc_a
 
-        #Line from OLS (slope/intercept only), to match the deliberately unweighted Hubaux and Vos
-        #LOD. The selected weights still enter the band's error propagation, exactly as in hub_vox:
-        #OLS residuals, weighted S_y|x and weighted leverage.
-        regr = ols(formula='y ~ x', data=df).fit()
-
-        #Level weights normalized to mean 1 (homoscedastic case: w = 1). The band is scale-
-        #invariant to this, but it keeps the standalone 1 (a future observation at x = 0)
-        #commensurate with the per-level weights, as Eq (8) requires.
-        w = (weight.iloc[:ncal].values if weight is not None else np.ones(ncal)).astype(float)
-        w = w/w.mean()
-        x_w = np.sum(w*x)/np.sum(w)
-        Sxx_w = np.sum(w*(x - x_w)**2)
-        S_y_x = np.sqrt(np.sum(w*regr.resid.values**2)/regr.df_resid)
-
-        #The prediction band is a hyperbola in x, so it needs a dense abscissa: drawn only through
-        #the calibration levels it becomes straight segments, flattening the waist at x = 0, where
-        #the LOD is read off.
-        grid = np.linspace(0, x.max(), 200)
-        #Future-observation weight: 1 at x = 0 (unit variance, as in Eq (8)) up to the level weights.
-        w0 = np.interp(grid, np.append(0, x), np.append(1, w))
-        #Prediction interval of a future observation, not the confidence band of the fitted mean.
-        se = S_y_x*np.sqrt(1/w0 + 1/np.sum(w) + (grid - x_w)**2/Sxx_w)
-        t = stats.t.ppf(1 - conf/2, regr.df_resid)
-        line  = regr.params['Intercept'] + regr.params['x']*grid
-        upper = line + t*se
-        lower = line - t*se
+        #Hyperbolic band, dense abscissa; extend past CCβ so the marker stays in view even when the
+        #LOD exceeds the calibration range. w0=1 everywhere, matching hub_vox's Eq (8) future observation.
+        grid = np.linspace(0, max(x.max(), cc_b)*1.05, 400)
+        se = band['S_y_x']*np.sqrt(1 + band['s_term'] + (grid - band['x_w'])**2/band['Sxx'])
+        line  = b0 + b1*grid
+        upper = line + band['t']*se
+        lower = line - band['t']*se
 
         fig= go.Figure()
         fig.add_trace(go.Scatter(x=df.x, y = df.y, mode='markers', marker=dict(size=8),
@@ -262,15 +251,44 @@ def conf_lm(conf, df:pd.DataFrame, ncal, weight:Optional[any]=None):
         fig.add_trace(go.Scatter(x=grid, y=upper, mode='lines', line=dict(dash='dash', color='red'), name='Upper prediction interval'))
         fig.add_trace(go.Scatter(x=grid, y=lower, mode='lines',line=dict(dash='dash', color='blue'), fill='tonexty',
                      fillcolor='rgba(244, 236, 194,0.4)', name='Lower prediction interval'))
+
+        #CCα and CCβ are marked only on the zoomed view (they live in the low-concentration corner);
+        #the full plot stays clean. Two coloured × markers at the y_C read-off, each with a drop line to
+        #the concentration axis; the grey horizontal at y_C ties the read-off together (Fig. 2).
+        if zoom:
+            a_col, b_col = '#7b3ff2', '#ff7f0e'         # CCα (decision limit), CCβ (LOD)
+            fig.add_shape(type='line', x0=0, y0=y_C, x1=cc_b, y1=y_C, layer='above', line=dict(color='#555', width=2, dash='dot'))
+            fig.add_shape(type='line', x0=cc_a, y0=0, x1=cc_a, y1=y_C, layer='above', line=dict(color=a_col, width=2, dash='dot'))
+            fig.add_shape(type='line', x0=cc_b, y0=0, x1=cc_b, y1=y_C, layer='above', line=dict(color=b_col, width=2, dash='dot'))
+            fig.add_trace(go.Scatter(x=[cc_a], y=[y_C], mode='markers', name='CCα (decision limit)',
+                        marker=dict(size=12, color=a_col, symbol='x', line=dict(width=2)),
+                        hovertext=[f'CCα = {cc_a:.3g}'], hoverinfo='text'))
+            fig.add_trace(go.Scatter(x=[cc_b], y=[y_C], mode='markers', name='CCβ (LOD)',
+                        marker=dict(size=12, color=b_col, symbol='x', line=dict(width=2)),
+                        hovertext=[f'CCβ = {cc_b:.3g}'], hoverinfo='text'))
+
+        #Zoom to the low-concentration corner where CCα and CCβ are read off (the paper's Fig. 2 view),
+        #so the band's waist and the intersections are legible instead of swamped by the full signal range.
+        title = 'Prediction interval'
+        if zoom:
+            title = 'Prediction interval — intercept region'
+            X = max(cc_b, x.min())*1.4
+            m = grid <= X
+            ylo = min(lower[m].min(), 0.0); yhi = upper[m].max()
+            pad = 0.08*(yhi - ylo)
+            fig.update_xaxes(range=[-0.03*X, X])
+            fig.update_yaxes(range=[ylo - pad, yhi + pad])
+
         fig.update_layout(
-                title_text='Prediction interval',
+                title_text=title,
                 title_x = 0.5,
                 xaxis_title='Concentration ratio',
-                yaxis_title='Signal ratio',    
+                yaxis_title='Signal ratio',
                 height=500,
                 width=700,
                 showlegend=True
                 )
-        fig.update_layout(legend=dict(yanchor="bottom", y=-0.5, orientation='h', yref='paper'))
+        fig.update_layout(margin=dict(b=150),
+                          legend=dict(orientation='h', yanchor='top', y=-0.25, xanchor='center', x=0.5))
 
         return fig

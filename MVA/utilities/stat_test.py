@@ -351,12 +351,32 @@ def hub_vox(ncal:int, conf:float, df:pd.DataFrame, means:pd.DataFrame, result_we
     rad = np.sqrt(1+s_term+t_term)
     s_y0 = S_y_x*rad
 
-    # Eq (7), turned into a concentration through the slope of Eq (11)
+    # Decision limit CCα (Eq. 12, del Río Bocio et al., J. Chemometrics 17 (2003) 413):
+    # y_C projected to concentration through the OLS slope. Single radical, evaluated at x=0.
     t = stats.t.ppf(1-conf, regr.df_resid)
-    x_lod = (t * s_y0)/regr.params['x'] * input_istd
-    x_loq = x_lod * 2
+    K = t * S_y_x / regr.params['x']            # normalized scale; cc_alpha = K*rad = t*s_y0/slope
+    cc_alpha = K * rad
 
-    return x_lod, x_loq
+    # Detection limit CCβ (Eq. 13): y_C projected onto the LOWER band, whose radical is
+    # evaluated at CCβ itself. s_D² is quadratic in CCβ, so the implicit eq is a quadratic:
+    #   (1-K²/Sxx)·CCβ² - 2(CCα-K²·x_w/Sxx)·CCβ + (CCα²-K²·C-K²·x_w²/Sxx) = 0
+    Sxx = np.sum(l*a*(x_i - x_w)**2)
+    C = 1 + s_term
+    qa = 1 - K**2/Sxx
+    qb = -2*(cc_alpha - K**2*x_w/Sxx)
+    qc = cc_alpha**2 - K**2*C - K**2*x_w**2/Sxx
+    cc_beta = max(np.roots([qa, qb, qc]))       # ponytail: physical root is the larger one (CCβ > CCα)
+
+    # invariant: CCβ satisfies Eq. (13), CCβ = CCα + K·√(C + (CCβ-x_w)²/Sxx)
+    assert np.isclose(cc_beta, cc_alpha + K*np.sqrt(C + (cc_beta - x_w)**2/Sxx))
+
+    # Geometry of THIS band (normalized scale) so the prediction-interval plot draws the same band the
+    # LOD is read from, and the CCα/CCβ markers land on it exactly (Fig. 2 of the paper). Single source
+    # of truth: conf_lm consumes these instead of re-deriving a band of its own.
+    band = dict(intercept=regr.params['Intercept'], slope=regr.params['x'], S_y_x=S_y_x,
+                s_term=s_term, x_w=x_w, Sxx=Sxx, t=t, cc_alpha=cc_alpha, cc_beta=cc_beta)
+    loq = cc_beta * 2                           # LOQ shortcut; UI may swap it for the first cal point
+    return cc_alpha*input_istd, cc_beta*input_istd, loq*input_istd, band
 
 
 def precision_routine(df: pd.DataFrame, n_days: int, type:Literal['intra', 'inter'], num: Optional[int]=None):

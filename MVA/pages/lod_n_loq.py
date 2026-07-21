@@ -6,11 +6,15 @@ import pandas as pd
 from nicegui import ui, app, events
 
 
-LOQ_INFO = ('The LOQ is obtained by multiplying the LOD value by two. \n'
-            'However, this method lacks statistical validation, \n'
+LOQ_INFO = ('CCα (decision limit): lowest signal distinguishable from the blank at risk α. \n'
+            'CCβ (LOD): lowest concentration reliably detected at risk β, read off the lower calibration band. \n'
+            'LOQ: taken as 2×LOD. This lacks statistical validation, \n'
             'so its use should be followed by experimental verification. \n'
             'A better alternative is to define the LOQ as the concentration level of the first calibration point, \n'
             'provided that the optimal criteria for precision and accuracy are satisfied.')
+
+CITATION = ('del Río Bocio FJ, Riu J, Boqué R, Rius FX. Limits of detection in linear regression with '
+            'errors in the concentration. J. Chemometrics 2003; 17: 413–421. DOI: 10.1002/cem.818')
 
 
 def lod_loq():
@@ -24,16 +28,18 @@ def lod_loq():
     #Mutable box for the results, so the checkbox handler can read what show_hub_vox computed.
     state = {}
 
+    def render_lod_table(loq):
+        df_lod = pd.DataFrame({'CCα (Decision limit)': [state['cc_alpha']],
+                               'CCβ (LOD)': [state['cc_beta']],
+                               'LOQ': [loq]})
+        ui.table.from_pandas(df_lod.round(2), title='Hubaux and Vos calculation').classes(replace='text-align: center').props('flat').style('width:450px; height:200px')
+
     def change_loq(e: events.ValueChangeEventArguments):
-        if e.value:
-            loq = df[f'{conc_name}'].min()
-        else:
-            loq = state['loq']
+        loq = df[f'{conc_name}'].min() if e.value else state['loq']
         app.storage.user['loq'] = loq
-        table = pd.DataFrame({'LOD': [state['lod']], 'LOQ': [loq]})
         with state['lod_table']:
             state['lod_table'].clear()
-            ui.table.from_pandas(table.round(2), title='Hubaux and Vos calculation').classes(replace='text-align: center').props('flat').style('width:300px; height:200px')
+            render_lod_table(loq)
 
     async def show_hub_vox():
         #cal_num is None when the dataset carries only three calibration levels, and 3 is then
@@ -43,15 +49,14 @@ def lod_loq():
         card_plot.clear()
         with card:
             ui.skeleton(width='300px', height='200px')
-            lod, loq = hub_vox(ncal=ncal, conf=alpha.value, df=df, means=means, result_weight=result_weight)
+            cc_alpha, cc_beta, loq, band = hub_vox(ncal=ncal, conf=alpha.value, df=df, means=means, result_weight=result_weight)
             card.clear()
-            state['lod'], state['loq'] = lod, loq
-            app.storage.user['lod'] = lod
+            state['cc_alpha'], state['cc_beta'], state['loq'] = cc_alpha, cc_beta, loq
+            app.storage.user['lod'] = cc_beta
             app.storage.user['loq'] = loq
-            df_lod = pd.DataFrame({'LOD': [lod], 'LOQ': [loq]})
             with ui.card().props('flat') as lod_table:
                 state['lod_table'] = lod_table
-                ui.table.from_pandas(df_lod.round(2), title='Hubaux and Vos calculation').classes(replace='text-align: center').props('flat').style('width:300px; height:200px')
+                render_lod_table(loq)
 
             with ui.row():
                 ui.checkbox('Use first calibration point as LOQ', on_change=change_loq)
@@ -60,25 +65,32 @@ def lod_loq():
                                                                   type='warning', multi_line=True,
                                                                   close_button='OK',
                                                                   classes='multi-line-notification')).props('flat')
+                with ui.dialog() as fig_dialog, ui.card(align_items='center').style('max-width: 720px'):
+                    ui.label('Figure 2 — The Hubaux and Vos approach for calculating the limit of detection').classes('text-weight-bold')
+                    ui.image('/static/hubaux_vos_fig2.png').style('width: 620px; max-width: 100%')
+                    ui.markdown(f'*{CITATION}*  \n[https://doi.org/10.1002/cem.818](https://doi.org/10.1002/cem.818)')
+                    ui.button('Close', on_click=fig_dialog.close).props('flat')
+                ui.button(icon='menu_book', on_click=fig_dialog.open).props('flat').tooltip('Show Figure 2 from the paper')
 
             #Notify straight away: sleeping first lets the user navigate away, and the
             #notification then targets a client NiceGUI has already deleted.
             if loq > df[f'{conc_name}'].min():
                 ui.notify('Computed LOQ is higher than your first calibration point!', position='center', timeout=0, close_button='OK', type='warning')
 
-            if lod > df[f'{conc_name}'].min():
+            if cc_beta > df[f'{conc_name}'].min():
                 ui.notify('Computed LOD is higher than your first calibration point!', position='center', timeout=0, close_button='OK', type='warning')
 
         with card_plot:
             card_plot.clear()
             spin = ui.spinner('bars', thickness=10, size='3em')
-            if isinstance(weight, pd.Series):
-                fig = conf_lm(conf=alpha.value, df=means, weight=weight, ncal=ncal)
-            else:
-                fig = conf_lm(conf=alpha.value, df=means, ncal=ncal)
+            fig_full = conf_lm(df=means, ncal=ncal, band=band)
+            fig_zoom = conf_lm(df=means, ncal=ncal, band=band, zoom=True)
             spin.delete()
-            with ui.card():
-                hd_plot(fig)
+            with ui.row():
+                with ui.card():
+                    hd_plot(fig_full)
+                with ui.card():
+                    hd_plot(fig_zoom)
 
     with theme.frame('LOD and LOQ'):
         ui.markdown('## **LOD and LOQ - Hubaux and Vos Method**')
