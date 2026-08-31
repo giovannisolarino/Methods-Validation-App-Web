@@ -1,5 +1,5 @@
 import theme
-from utilities.pd_utilities import means_data
+from utilities.pd_utilities import means_data, sig_df
 from utilities.stat_test import hub_vox, levene_test, weight_sel
 from utilities.plotly_utilities import conf_lm, hd_plot
 import pandas as pd
@@ -32,7 +32,7 @@ def lod_loq():
         df_lod = pd.DataFrame({'CCα (Decision limit)': [state['cc_alpha']],
                                'CCβ (LOD)': [state['cc_beta']],
                                'LOQ': [loq]})
-        ui.table.from_pandas(df_lod.round(2), title='Hubaux and Vos calculation').classes(replace='text-align: center').props('flat').style('width:450px; height:200px')
+        ui.table.from_pandas(sig_df(df_lod), title='Hubaux and Vos calculation').classes(replace='text-align: center').props('flat').style('width:450px; height:200px')
 
     def change_loq(e: events.ValueChangeEventArguments):
         loq = df[f'{conc_name}'].min() if e.value else state['loq']

@@ -1,6 +1,6 @@
 import theme
 import pandas as pd
-from utilities.pd_utilities import means_data, display_df
+from utilities.pd_utilities import means_data, display_df, sig_df
 from utilities.plotly_utilities import make_biplot, uloq_lloq_graph, show_model, residual_graph, kde_resid, q_qplot, hd_plot
 from utilities.stat_test import (levene_test, f_test_sced, weight_sel, model_wls, model_ols,
                                  shapiro_wilk, select_model)
@@ -61,7 +61,7 @@ def linearity():
             plot.clear()
             ui.markdown(f'### Best model: {mandel}')
             with ui.row():
-                ui.table.from_pandas(mandel_summary.round(2), title='Mandel test').classes(replace='text-align: center').props('flat').style('width:350px')
+                ui.table.from_pandas(sig_df(mandel_summary), title='Mandel test').classes(replace='text-align: center').props('flat').style('width:350px')
                 ui.element('div').style('width: 300px; visibility: hidden;')
                 if data_stat is not None:
                     with ui.card(align_items='center').tooltip('Additional t-test and F-test to compare models\' residuals (α = 0.01)'):
@@ -71,8 +71,8 @@ def linearity():
                                     </br>
                                     the simplest model will be chosen as best model.
                                     ''')
-                        ui.table.from_pandas(data_stat.round(4)).classes(replace='text-align: center').props('flat').style('width:300px')
-            ui.table.from_pandas(best_summary.round(4)).classes(replace='text-align: center').props('flat').style('width:350px')
+                        ui.table.from_pandas(sig_df(data_stat)).classes(replace='text-align: center').props('flat').style('width:300px')
+            ui.table.from_pandas(sig_df(best_summary)).classes(replace='text-align: center').props('flat').style('width:350px')
             hd_plot(model)
 
     def show_plot(trend: str):
@@ -100,9 +100,9 @@ def linearity():
             plot.clear()
             ui.markdown(f'### {label} Model')
             with ui.row():
-                ui.table.from_pandas(summary.round(4)).classes(replace='text-align: center').style('width: 400px').props('flat')
+                ui.table.from_pandas(sig_df(summary)).classes(replace='text-align: center').style('width: 400px').props('flat')
                 ui.space()
-                table_shap = ui.table.from_pandas(shap.round(4), title='Shapiro-Wilk test on residuals').classes(replace='text-align: center').style('width: 400px').props('flat')
+                table_shap = ui.table.from_pandas(sig_df(shap), title='Shapiro-Wilk test on residuals').classes(replace='text-align: center').style('width: 400px').props('flat')
                 table_shap.add_slot('body-cell-pvalue', '''
                     <q-td key="pvalue" :props="props">
                     <q-badge :color="props.value < 0.05 ? 'red' : 'green'">

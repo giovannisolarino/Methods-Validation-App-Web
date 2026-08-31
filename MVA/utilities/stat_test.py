@@ -3,7 +3,7 @@ import numpy as np
 import warnings
 from nicegui import ui, app
 from typing import Literal, Optional
-from utilities.pd_utilities import comb_intra, gen_combinations, means_data, group_days
+from utilities.pd_utilities import comb_intra, gen_combinations, means_data, group_days, sig
 import scipy.stats as stats
 import statsmodels.api as sm
 from statsmodels.formula.api import ols, wls
@@ -46,7 +46,7 @@ def levene_test(df: pd.DataFrame):
             elif res.pvalue > 0.05:
                 outcome = 'Homoscedastic'
     
-        levenedf = {'p-value':[round(res.pvalue, 4)],'Outcome':[outcome]}
+        levenedf = {'p-value':[sig(res.pvalue)],'Outcome':[outcome]}
         levenedf = pd.DataFrame(levenedf)       
         return levenedf, outcome
 
@@ -74,7 +74,7 @@ def f_test_sced(df: pd.DataFrame):
     else:
         outcome_f = 'Homoscedastic'
 
-    f_df = {'p-value':[round(p,4)],'Outcome':[outcome_f]}
+    f_df = {'p-value':[sig(p)],'Outcome':[outcome_f]}
     f_df = pd.DataFrame(f_df)
 
     return f_df        
@@ -205,6 +205,21 @@ def select_model(results: dict, kind: Literal['wls', 'ols']):
     return mandel, summary, data_stat
 
 
+def poly_eq(*coeffs):
+    '''
+    Render y = b0 + b1x + b2x2 with 4 SIGNIFICANT digits and real signs.
+    Takes 2 coefficients for the linear model, 3 for the quadratic.
+
+    Significant digits, not decimals: a curvature coefficient is routinely ~1e-05,
+    which ':.4f' printed as "-0.0000" - hiding the very term that made the quadratic
+    model win. Signs fold into the operator, so a negative term reads
+    " - 1.207e-05x2" instead of " + -1.207e-05x2".
+    '''
+    terms = [sig(coeffs[0])] + [f' {"-" if c < 0 else "+"} {sig(abs(c))}{v}'
+                                for c, v in zip(coeffs[1:], ('x', 'x\u00b2'))]
+    return 'y = ' + ''.join(terms)
+
+
 def curve_grids(means: pd.DataFrame, n: int = 200):
     #The x grids the fitted lines are evaluated on: means_x spans the calibration range,
     #extended_x extrapolates past the ULOQ. show_model() plots against these same grids, so
@@ -224,7 +239,7 @@ def model_wls(df:pd.DataFrame, means: pd.DataFrame, weight: pd.Series):
     wls_lin_raw = wls(formula='y ~ x', data=fit_data, weights=df['Weight']).fit()
     line_wls_lin_means = wls_lin_means.params['Intercept'] + wls_lin_means.params['x']*means_x
     line_wls_lin_raw = wls_lin_raw.params['Intercept'] + wls_lin_raw.params['x']*extended_x
-    equation_lin = f"y = {wls_lin_means.params['Intercept']:.4f} + {wls_lin_means.params['x']:.4f}x"
+    equation_lin = poly_eq(wls_lin_means.params['Intercept'], wls_lin_means.params['x'])
     #R\u00b2 comes from the raw fit: averaging the replicates away hides the within-level scatter
     #and inflates it.
     r_squared_lin = f"R\u00b2: {wls_lin_raw.rsquared:.4f}"
@@ -234,7 +249,7 @@ def model_wls(df:pd.DataFrame, means: pd.DataFrame, weight: pd.Series):
     wls_quad_raw = wls(formula='y ~ x + I(x**2)', data=fit_data, weights=df['Weight']).fit()
     line_wls_quad_means = wls_quad_means.params['Intercept'] + wls_quad_means.params['x']*means_x + wls_quad_means.params['I(x ** 2)']*((means_x)**2)
     line_wls_quad_raw = wls_quad_raw.params['Intercept'] + wls_quad_raw.params['x']*extended_x + wls_quad_raw.params['I(x ** 2)']*((extended_x)**2)
-    equation_quad = f"y = {wls_quad_means.params['Intercept']:.4f} + {wls_quad_means.params['x']:.4f}x + {wls_quad_means.params['I(x ** 2)']:.4f}x\u00b2"
+    equation_quad = poly_eq(wls_quad_means.params['Intercept'], wls_quad_means.params['x'], wls_quad_means.params['I(x ** 2)'])
     r_squared_quad = f"R\u00b2: {wls_quad_raw.rsquared:.4f}"
 
 
@@ -265,7 +280,7 @@ def model_ols(df:pd.DataFrame, means: pd.DataFrame):
     ols_lin_raw = ols(formula='y ~ x', data=fit_data).fit()
     line_ols_lin_means = ols_lin_means.params['Intercept'] + ols_lin_means.params['x']*means_x
     line_ols_lin_raw = ols_lin_raw.params['Intercept'] + ols_lin_raw.params['x']*extended_x
-    equation_lin = f"y = {ols_lin_means.params['Intercept']:.4f} + {ols_lin_means.params['x']:.4f}x"
+    equation_lin = poly_eq(ols_lin_means.params['Intercept'], ols_lin_means.params['x'])
     #See model_wls.
     r_squared_lin = f"R\u00b2: {ols_lin_raw.rsquared:.4f}"
     
@@ -274,7 +289,7 @@ def model_ols(df:pd.DataFrame, means: pd.DataFrame):
     ols_quad_raw = ols(formula='y ~ x + I(x**2)', data=fit_data).fit()
     line_ols_quad_means = ols_quad_means.params['Intercept'] + ols_quad_means.params['x']*means_x + ols_quad_means.params['I(x ** 2)']*((means_x)**2)
     line_ols_quad_raw = ols_quad_raw.params['Intercept'] + ols_quad_raw.params['x']*extended_x + ols_quad_raw.params['I(x ** 2)']*((extended_x)**2)
-    equation_quad = f"y = {ols_quad_means.params['Intercept']:.4f} + {ols_quad_means.params['x']:.4f}x + {ols_quad_means.params['I(x ** 2)']:.4f}x\u00b2"
+    equation_quad = poly_eq(ols_quad_means.params['Intercept'], ols_quad_means.params['x'], ols_quad_means.params['I(x ** 2)'])
     r_squared_quad = f"R\u00b2: {ols_quad_raw.rsquared:.4f}"
 
 

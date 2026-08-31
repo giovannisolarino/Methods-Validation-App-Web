@@ -67,6 +67,29 @@ def normalize(df: pd.DataFrame, selected_col: list, istd_conc):
     return df
 
 
+def sig(x, digits: int = 4):
+    '''
+    Format a number with `digits` significant digits, falling back to scientific
+    notation only when fixed notation would hide them. This is R's signif(), which
+    the reference implementation uses throughout: 4 decimals turns a real -1.207e-05
+    curvature coefficient into "-0.0000".
+
+    Display only. The underlying value keeps full precision.
+    '''
+    if isinstance(x, bool) or not isinstance(x, (int, float, np.number)) or not np.isfinite(x):
+        return x
+    return f'{x:.{digits}g}'
+
+
+def sig_df(df: pd.DataFrame, digits: int = 4):
+    '''
+    sig() over every cell of a DataFrame, for on-screen tables. Non-numeric cells
+    pass through untouched. Use in place of .round(n) wherever a column can span
+    orders of magnitude (p-values, fitted parameters, LOD/LOQ concentrations).
+    '''
+    return df.applymap(lambda v: sig(v, digits))
+
+
 def display_df(df: pd.DataFrame, exclude: tuple = ('ID', 'x', 'Calibrator', 'Weight')):
     '''
     Return a copy of a DataFrame with the signal columns rendered in scientific
