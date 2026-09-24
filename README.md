@@ -22,8 +22,6 @@
   <a href="#credits">Credits</a> •
   <a href="#related">Related</a> •
   <a href="#how-to-cite-us">How To Cite Us</a> 
-  <br>
-  <a href="#license">License</a>
 </p>
 
 
@@ -246,11 +244,5 @@ If you're looking to enhance your validation study with additional key parameter
 ## How To Cite Us
 
 Upcoming publication
-
-
-## License
-
-FREEWARE
-[TO ADD]
 
 ---
