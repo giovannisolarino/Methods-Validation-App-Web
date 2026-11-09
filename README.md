@@ -41,7 +41,7 @@
 * Recovery
 
 ## Web-app
-MVA (Version 1.0) is now freely available at [mva.databloom.it](https://mva.databloom.it/).
+MVA (Version 1.1.0) is now freely available at [mva.databloom.it](https://mva.databloom.it/).
 
 ## Run Locally
 
