@@ -139,7 +139,7 @@ def shapiro_wilk(model):
     stat, pval = stats.shapiro(model.wresid)
     if pval < 0.05:
         info = 'Residuals don\'t follow normal distribution'
-    elif pval > 0.05: 
+    else:
         info = 'Residuals follow normal distribution'
     
     shapiro_data = pd.DataFrame({'Test statistic': [stat],

@@ -1,6 +1,6 @@
 import theme
 import pandas as pd
-from utilities.pd_utilities import means_data, display_df, sig_df
+from utilities.pd_utilities import means_data, display_df, sig_df, sig
 from utilities.plotly_utilities import make_biplot, uloq_lloq_graph, show_model, residual_graph, kde_resid, q_qplot, hd_plot
 from utilities.stat_test import (levene_test, f_test_sced, weight_sel, model_wls, model_ols,
                                  shapiro_wilk, select_model)
@@ -31,6 +31,9 @@ def linearity():
         #is the only thing telling the user why the plot disagrees with the table.
         update_name_button(dpbutton, 'Best calibration model')
         mandel, mandel_summary, data_stat = select_model(results, kind)
+        #Same raw fit show_plot() runs Shapiro-Wilk on, so the flag agrees with that page's verdict.
+        _, shap = shapiro_wilk(model=results[f'{kind}_{"quad" if mandel == "Quadratic" else "lin"}_raw'])
+        non_normal = shap['pvalue'].iloc[0] < 0.05
 
         if mandel == 'Quadratic':
             best_summary = pd.DataFrame({
@@ -60,6 +63,11 @@ def linearity():
         with plot:
             plot.clear()
             ui.markdown(f'### Best model: {mandel}')
+            if non_normal:
+                with ui.row().classes('w-fit items-center gap-1 bg-warning rounded px-2 py-1 text-sm'):
+                    ui.icon('warning', size='xs')
+                    ui.label(f'The results might be biased due to the non-normality of the residuals '
+                             f'(Shapiro-Wilk p = {sig(shap["pvalue"].iloc[0])} < 0.05).')
             with ui.row():
                 ui.table.from_pandas(sig_df(mandel_summary), title='Mandel test').classes(replace='text-align: center').props('flat').style('width:350px')
                 ui.element('div').style('width: 300px; visibility: hidden;')
