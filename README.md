@@ -10,6 +10,9 @@
 <h2 align="center">MVA WILL BE PUBLISHED SOON.</h2>
 <h4 align="center">Analytical method validation software written in Python.</h4>
 
+
+<h4 align=center><a href="https://doi.org/10.5281/zenodo.24077573"><img src="https://zenodo.org/badge/958504872.svg" alt="DOI"></a></h4>
+
 <p align="center">
   <a href="#key-features">Key Features</a> •
   <a href="#web-app">Web-app</a> •
